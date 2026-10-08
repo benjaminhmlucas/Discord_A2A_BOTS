@@ -117,6 +117,10 @@ In your configured channel, mention one enabled bot and send:
 
 With the default three-bot order, each bot should reply twice, then the bridge reports completion. A missing participant stops the discussion with a notice.
 
+Discussion replies include a validated control decision. A participant can stop immediately when the user's stop condition is met, or report consensus when all participants have explicitly agreed. The bridge closes the discussion and issues no next-bot mention or token. Missing or malformed decisions also stop the chain. The requested count is an upper bound, capped at 15 turns.
+
+Public chat providers cannot browse GitHub or retrieve links. Supply the relevant code or diff in the conversation for review; a repository URL alone is not a pull request or an inspected source. Saying "stop if you cannot access it" now ends the discussion after that explanation.
+
 ## Development checks
 
 ```powershell

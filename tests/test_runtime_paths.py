@@ -166,3 +166,83 @@ def test_dispatch_boundary(error):
     else:
         asyncio.run(dispatch(bridge, object()))
         assert bridge.log.called == bool(error)
+
+
+class DiscussionControls(unittest.IsolatedAsyncioTestCase):
+    setUp = fixtures.Tests.setUp
+    tearDown = fixtures.Tests.tearDown
+
+    async def test_cannot_access_request_stops_without_handoff(self):
+        self.c.provider = AsyncMock(return_value=json.dumps({
+            'decision': 'stop', 'reply': 'CodexBot: I cannot retrieve that repository; stopping as requested.'}))
+        await self.c.handle(Message(1, f'<@{C}> /discuss 25 review https://example.invalid/repository; '
+                                    'if you cannot access it, stop immediately', self.channel))
+        result, options = self.channel.sent[-1]
+        self.assertNotIn('[bridge:', result.content)
+        self.assertNotIn(f'<@{A}>', result.content)
+        self.assertIn('Discussion stopped', result.content)
+        self.assertFalse(options['allowed_mentions'].users)
+        with self.c.state.connect() as db:
+            row = db.execute('SELECT status,busy,token FROM discussions').fetchone()
+            self.assertEqual(tuple(row), ('complete', 0, ''))
+        await self.a.handle(result)
+        self.assertFalse(self.calls)
+
+    async def test_later_participant_can_stop_and_previous_marker_cannot_replay(self):
+        self.c.provider = AsyncMock(return_value=json.dumps({'decision': 'continue', 'reply': 'First reply.'}))
+        self.a.provider = AsyncMock(return_value=json.dumps({'decision': 'stop', 'reply': 'Blocked; stopping.'}))
+        await self.c.handle(Message(1, f'<@{C}> /discuss 6 topic', self.channel))
+        trigger = self.channel.sent[-1][0]
+        self.channel.sender = A
+        await self.a.handle(trigger)
+        result = self.channel.sent[-1][0]
+        self.assertNotIn('[bridge:', result.content)
+        self.assertIn('Discussion stopped', result.content)
+        await self.c.handle(result)
+        await self.a.handle(trigger)
+        self.assertEqual(self.c.provider.await_count, 1)
+        self.assertEqual(self.a.provider.await_count, 1)
+
+    async def test_consensus_ends_before_turn_budget(self):
+        self.c.provider = AsyncMock(return_value=json.dumps({'decision': 'consensus', 'reply': 'All participants agree.'}))
+        await self.c.handle(Message(1, f'<@{C}> /discuss 6 reach consensus', self.channel))
+        result = self.channel.sent[-1][0]
+        self.assertIn('Discussion complete: consensus reported', result.content)
+        self.assertNotIn('[bridge:', result.content)
+
+    async def test_plaintext_or_malformed_control_never_continues(self):
+        replies = ['I cannot inspect the link. I am stopping here.', '[]', '{}',
+                   '{"decision":"go","reply":"answer"}',
+                   '{"decision":"continue","reply":null}',
+                   '{"decision":"continue","reply":" "}',
+                   '{"decision":"continue","reply":"answer","next_bot":999}',
+                   '{"decision":"continue","reply":"answer"} trailing text']
+        for identity, reply in enumerate(replies, 1):
+            self.c.provider = AsyncMock(return_value=reply)
+            await self.c.handle(Message(identity, f'<@{C}> /discuss 6 topic', self.channel))
+            result, options = self.channel.sent[-1]
+            self.assertIn('invalid participant control', result.content)
+            self.assertNotIn('[bridge:', result.content)
+            self.assertFalse(options['allowed_mentions'].users)
+        with self.c.state.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM discussions WHERE status='active'").fetchone()[0], 0)
+
+    async def test_fenced_control_and_quoted_stop_do_not_override_decision(self):
+        self.c.provider = AsyncMock(return_value='```json\n' + json.dumps({
+            'decision': 'continue', 'reply': 'An example sentence is "I am stopping here"; we are still discussing.'}) + '\n```')
+        await self.c.handle(Message(1, f'<@{C}> /discuss 3 talk about wording', self.channel))
+        self.assertIn('[bridge:', self.channel.sent[-1][0].content)
+        self.assertNotIn('"decision":', self.channel.sent[-1][0].content)
+
+    async def test_provider_diagnostics_preserve_only_safe_code(self):
+        from bridge_providers import ProviderError
+        logs = []
+        self.c.log = logs.append
+        self.c.provider = AsyncMock(side_effect=ProviderError('GeminiHTTP429'))
+        await self.c.handle(Message(1, f'<@{C}> /discuss 3 topic', self.channel))
+        self.assertEqual(self.c.health['last_error'], 'GeminiHTTP429')
+        self.assertTrue(any('failed: GeminiHTTP429' in line for line in logs))
+        self.assertNotIn('[bridge:', self.channel.sent[-1][0].content)
+        self.c.provider = AsyncMock(side_effect=RuntimeError('SYNTHETIC_SECRET_MUST_NOT_APPEAR'))
+        await self.c.handle(Message(2, f'<@{C}> hi', self.channel))
+        self.assertFalse(any('SYNTHETIC_SECRET' in line for line in logs))

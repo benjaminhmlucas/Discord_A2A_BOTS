@@ -1,4 +1,5 @@
 import asyncio
+import json
 import shutil
 import sys
 import tempfile
@@ -87,7 +88,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
 
         async def provider(prompt, work=False):
             self.calls.append((prompt, work))
-            return 'A reply with HIDDEN VALUE and @everyone.'
+            reply = 'A reply with HIDDEN VALUE and @everyone.'
+            return json.dumps({'decision': 'continue', 'reply': reply}) if 'DISCUSSION RESPONSE PROTOCOL' in prompt else reply
 
         self.provider = provider
         self.c = Bridge(Client(C), C, provider, lambda _: None, self.root, self.memory)
@@ -250,7 +252,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
     async def test_duplicate_human_message_and_multichunk_marker(self):
         async def long(prompt, work=False):
             self.calls.append(prompt)
-            return 'x' * 6000 + ' [discuss:99999:42]'
+            return json.dumps({'decision': 'continue', 'reply': 'x' * 6000 + ' [discuss:99999:42]'})
         self.c.provider = long
         message = Message(2, f'<@{C}> discuss 3 hi', self.channel)
         await self.c.handle(message)

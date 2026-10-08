@@ -105,6 +105,13 @@ class Response:
         return self.result
 
 
+def test_provider_error_rejects_sensitive_or_unbounded_codes():
+    for value in ('Authorization: synthetic-secret', 'GeminiHTTP999', 'ClaudeExit' + '1' * 11, 'GeminiHTTP429\nsecret'):
+        with pytest.raises(ValueError, match='Invalid provider error code'):
+            providers.ProviderError(value)
+    assert providers.ProviderError('GeminiHTTP429').code == 'GeminiHTTP429'
+
+
 class Session:
     def __init__(self, replies):
         self.post = MagicMock(side_effect=replies)
@@ -112,6 +119,15 @@ class Session:
         return self
     async def __aexit__(self, *args):
         return False
+
+
+@pytest.mark.parametrize('status', [429, 503])
+def test_exhausted_transient_gemini_status_is_retained(status):
+    session = Session([Response(status), Response(status), Response(status)])
+    with patch.object(providers, 'secret', return_value='synthetic-key'), patch.object(providers.aiohttp, 'ClientSession', return_value=session), patch.object(providers.asyncio, 'sleep', AsyncMock()):
+        with pytest.raises(providers.ProviderError, match=f'GeminiHTTP{status}'):
+            asyncio.run(providers.Gemini('synthetic-model')('fixture'))
+    assert session.post.call_count == 3
 
 
 @pytest.mark.parametrize('mode', ['ok', 'retry', 'error', 'blocked', 'connection_retry', 'connection_fail', 'timeout_retry', 'timeout_fail', 'work'])

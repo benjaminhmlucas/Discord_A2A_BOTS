@@ -32,7 +32,18 @@ def test_actual_authenticated_provider_reply(tmp_path, name):
     code = ("import asyncio,bridge_providers as p; "
             f"provider=p.Gemini({settings['gemini_model']!r})" if name == 'gemini' else
             f"import asyncio,bridge_providers as p;provider=p.{name}")
-    code += ";print(asyncio.run(provider('Reply with exactly BOTBRIDGE_PROVIDER_SMOKE_OK and nothing else. Do not use tools.')))"
+    code += (
+        ";from bridge_runtime import DISCUSSION_CONTROL,discussion_reply;"
+        "smoke=asyncio.run(provider('Reply with exactly BOTBRIDGE_PROVIDER_SMOKE_OK and nothing else. Do not use tools.'));"
+        "assert smoke.strip()=='BOTBRIDGE_PROVIDER_SMOKE_OK';"
+        "normal=asyncio.run(provider('You are a text-only Discord participant. Original request: discuss a movie idea; "
+        "this is the first turn and nobody has agreed yet. Give one sentence and continue.'+DISCUSSION_CONTROL));"
+        "assert discussion_reply(normal)[1]=='continue';"
+        "blocked=asyncio.run(provider('You are a text-only Discord participant. Original request: review "
+        "https://example.invalid/pull/7. If you cannot retrieve it, explain briefly and stop the discussion immediately. "
+        "The link contents have not been supplied.'+DISCUSSION_CONTROL));"
+        "assert discussion_reply(blocked)[1]=='stop';"
+        "print('BOTBRIDGE_PROVIDER_SMOKE_OK')")
     result = subprocess.run([sys.executable, '-c', code], cwd=root, env=env, capture_output=True, text=True, timeout=250)
     assert result.returncode == 0, f'{name} real provider failed; inspect private diagnostics locally'
     assert result.stdout.strip() == 'BOTBRIDGE_PROVIDER_SMOKE_OK', f'{name} real provider response failed the exact-content check'
@@ -41,5 +52,6 @@ def test_actual_authenticated_provider_reply(tmp_path, name):
     if receipt:
         path = Path(receipt)
         previous = json.loads(path.read_text()) if path.exists() else {}
-        previous[name] = {'real_authenticated_request': 'passed', 'exact_reply': 'passed', 'discord_posts': 0}
+        previous[name] = {'real_authenticated_request': 'passed', 'exact_reply': 'passed',
+                          'discussion_continue': 'passed', 'conditional_stop': 'passed', 'discord_posts': 0}
         path.write_text(json.dumps(previous, indent=2) + '\n')

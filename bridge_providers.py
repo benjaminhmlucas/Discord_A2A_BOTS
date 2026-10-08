@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -16,6 +17,16 @@ NODE = str(_node if _node.is_absolute() else ROOT / _node)
 CODEX = str(local_path('codex_cli'))
 CLAUDE = str(local_path('claude_cli'))
 MEMORY = str(local_path('memory_dir'))
+
+
+class ProviderError(RuntimeError):
+    """Only static codes and numeric statuses may enter health files and logs."""
+    def __init__(self, code):
+        if not re.fullmatch(r'(?:GeminiHTTP[1-5][0-9]{2}|GeminiEmptyContent|CodexExit-?[0-9]{1,10}|'
+                            r'ClaudeExit-?[0-9]{1,10}|ClaudeBackendError|EmptyCodexResponse|EmptyClaudeResponse)', code):
+            raise ValueError('Invalid provider error code')
+        self.code = code
+        super().__init__(code)
 
 
 def secret(name):
@@ -85,10 +96,10 @@ async def codex(prompt, work=False):
                     cwd=MEMORY if work else runtime, env=child_env())
         await asyncio.wait_for(proc.communicate(prompt.encode('utf-8')), 225)
         if proc.returncode:
-            raise RuntimeError(f'Codex exit {proc.returncode}')
+            raise ProviderError(f'CodexExit{proc.returncode}')
         reply = output.read_text(encoding='utf-8').strip()
         if not reply:
-            raise RuntimeError('Empty Codex response')
+            raise ProviderError('EmptyCodexResponse')
         return reply
     finally:
         if proc and proc.returncode is None:
@@ -119,13 +130,13 @@ class Gemini:
                                 attempt += 1
                                 continue
                             if resp.status != 200:
-                                raise RuntimeError(f'Gemini HTTP {resp.status}')
+                                raise ProviderError(f'GeminiHTTP{resp.status}')
                             result = await resp.json()
                             candidates = result.get('candidates') or []
                             parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
                             text = '\n'.join(p.get('text', '') for p in parts if not p.get('thought')).strip()
                             if not text:
-                                raise RuntimeError('Gemini returned empty/blocked content')
+                                raise ProviderError('GeminiEmptyContent')
                             return text
                     except (aiohttp.ClientError, asyncio.TimeoutError):
                         if attempt == 2:
@@ -152,13 +163,13 @@ async def claude(prompt, work=False):
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(prompt.encode('utf-8')), 120)
         if proc.returncode:
-            raise RuntimeError(f'Claude exit {proc.returncode}')
+            raise ProviderError(f'ClaudeExit{proc.returncode}')
         result = json.loads(stdout.decode('utf-8'))
         if result.get('is_error'):
-            raise RuntimeError('Claude backend error')
+            raise ProviderError('ClaudeBackendError')
         reply = result.get('result', '').strip()
         if not reply:
-            raise RuntimeError('Empty Claude response')
+            raise ProviderError('EmptyClaudeResponse')
         return reply
     finally:
         if proc.returncode is None:
