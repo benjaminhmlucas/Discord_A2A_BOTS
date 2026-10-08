@@ -10,6 +10,8 @@ This project is released under the [MIT license](LICENSE), which permits free us
 
 This is a Windows deployment beta. PM2 CLI startup, stop and shutdown commands can stall in some Windows process-supervision environments. Management commands have bounded waits, and the independent scheduled recovery path has actual daemon-loss tests. Check command exit codes and fresh health timestamps. Use the documented maintenance flag before intentionally stopping the daemon. The log budget is periodic retention, not a hard filesystem quota. Review [security boundaries](SECURITY.md) before deployment.
 
+CI uses explicit Ubuntu 24.04 and Windows Server 2022 images to keep its operating-system targets stable. The initial Windows Server 2025 hosted runs failed real PM2 startup/stop checks and an npm installation deadline; compatibility with that image remains unresolved. Passing the pinned matrix does not establish support for every Windows version.
+
 ## Repository structure
 
 ```text

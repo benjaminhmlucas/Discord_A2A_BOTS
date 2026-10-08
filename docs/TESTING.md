@@ -25,7 +25,7 @@ Optional test environment variables `BOTBRIDGE_TEST_NODE` and `BOTBRIDGE_TEST_PO
 
 Optional `BOTBRIDGE_TEST_PM2_PREFIX` selects a previously installed PM2 prefix to copy into the temporary checkout. Otherwise the pinned package is installed with npm. `BOTBRIDGE_TEST_NPM_CLI` can select the npm JavaScript entry; by default it is located beside Node. `BOTBRIDGE_TEST_PM2_RECEIPT` optionally saves a result receipt outside the checkout.
 
-The native tests are skipped on Linux. The GitHub Actions matrix runs portable unit checks on Linux and Windows, and actual Windows setup checks on Windows. Missing native prerequisites fail the Windows suite rather than silently skipping it.
+The native tests are skipped on Linux. The GitHub Actions matrix uses Ubuntu 24.04 and Windows Server 2022, runs portable unit checks on both, and actual Windows setup checks on Windows. Missing native prerequisites fail the Windows suite rather than silently skipping it. Windows Server 2025 hosted verification encountered real PM2 and npm timeouts and remains unresolved; the explicit matrix is a reproducible baseline, not a resolution of those failures.
 
 ## Independent recovery verification
 
