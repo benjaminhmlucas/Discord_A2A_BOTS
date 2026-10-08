@@ -1,0 +1,22 @@
+[run]
+branch = true
+source = .
+relative_files = true
+omit =
+    tests/*
+    .venv/*
+    tools/*
+
+[report]
+precision = 2
+fail_under = 100
+show_missing = true
+include_namespace_packages = true
+exclude_lines =
+partial_branches =
+
+[html]
+directory = coverage_html
+
+[json]
+output = coverage.json

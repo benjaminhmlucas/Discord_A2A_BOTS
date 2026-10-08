@@ -1,0 +1,31 @@
+{
+  "channel_id": 301,
+  "owner_id": 201,
+  "enabled_bots": [
+    101,
+    102
+  ],
+  "max_turns": 15,
+  "queue_capacity": 4,
+  "queue_wait_seconds": 90,
+  "request_seconds": 240,
+  "total_request_seconds": 430,
+  "send_seconds": 20,
+  "handoff_seconds": 600,
+  "history_messages": 15,
+  "history_chars": 16000,
+  "public_context_file": "public_context.md",
+  "gemini_model": "gemini-2.5-flash",
+  "codex_model": "",
+  "codex_reasoning_effort": "high",
+  "daily_sync_enabled": false,
+  "bot_ids": {
+    "codex": 101,
+    "antigravity": 102,
+    "claude": 103
+  },
+  "allowed_user_ids": [
+    201
+  ],
+  "allow_work": true
+}

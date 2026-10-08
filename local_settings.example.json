@@ -1,0 +1,7 @@
+{
+  "node_executable": "node",
+  "pm2_cli": "tools/pm2/node_modules/pm2/bin/pm2",
+  "codex_cli": "tools/codex-cli/node_modules/@openai/codex/bin/codex.js",
+  "claude_cli": "tools/claude-cli/node_modules/@anthropic-ai/claude-code/cli.js",
+  "memory_dir": "private_memory"
+}
