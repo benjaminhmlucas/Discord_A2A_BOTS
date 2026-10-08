@@ -8,6 +8,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
@@ -19,7 +20,18 @@ jobs:
           package-manager-cache: false
       - run: python -m pip install -r requirements-dev.txt
       - run: python scripts/check_release.py
-      - run: python -m coverage run -m pytest tests -q
+      - run: python -m coverage run -m pytest tests -v --durations=10 --basetemp="${{ runner.temp }}/native-tests"
+      - name: Preserve failed native daemon diagnostics
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-diagnostics
+          path: |
+            ${{ runner.temp }}/native-tests/**/pm2.log
+            ${{ runner.temp }}/native-tests/**/command.log
+            ${{ runner.temp }}/native-tests/**/control-diagnostics.log
+          if-no-files-found: warn
+          retention-days: 7
       - run: python -m coverage json
       - run: python -m coverage report
       - run: python scripts/check_coverage.py coverage.json

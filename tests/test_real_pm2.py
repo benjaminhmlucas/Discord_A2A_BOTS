@@ -35,15 +35,18 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
     for name in ('CODEXBOT_TOKEN', 'ANTIGRAVITYBOT_TOKEN', 'CLAUDEBOT_TOKEN', 'GEMINI_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'):
         env[name] = 'synthetic-pm2-integration-only'
 
-    def command(args, custom=env):
+    def command(args, custom=env, timeout=90):
         # Real daemon descendants cannot hold an output-capture pipe open on Windows.
         with tempfile.TemporaryFile('w+', encoding='utf-8', errors='replace') as stdout, tempfile.TemporaryFile('w+', encoding='utf-8', errors='replace') as stderr:
             proc = subprocess.Popen([str(arg) for arg in args], cwd=root, env=custom,
                                     stdout=stdout, stderr=stderr)
             try:
-                code = proc.wait(timeout=90)
+                code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 manage.stop_command(proc)
+                stdout.seek(0)
+                stderr.seek(0)
+                print('Timed out command output:', stdout.read(), stderr.read(), flush=True)
                 raise
             stdout.seek(0)
             stderr.seek(0)
@@ -104,7 +107,8 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         first_pid = int((root / '.pm2/pm2.pid').read_text())
         second_pid = int((root / 'second-daemon/pm2.pid').read_text())
         assert first_pid != second_pid
-        command([native.POWERSHELL, '-NoProfile', '-File', root / 'scripts/start.ps1'])
+        # This wrapper runs six independently bounded PM2 commands plus npm.
+        command([native.POWERSHELL, '-NoProfile', '-File', root / 'scripts/start.ps1'], timeout=900)
         assert not (root / '.pm2/dump.pm2').exists()
         names = {row['name'] for row in processes()}
         assert names == {'codexbot', 'antigravitybot', 'claudebot', 'botbridge-log-manager', 'botbridge-health', 'pm2-logrotate'}

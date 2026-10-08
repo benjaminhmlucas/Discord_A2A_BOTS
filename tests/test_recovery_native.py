@@ -31,7 +31,8 @@ def test_actual_scheduled_recovery_and_preserved_stop(tmp_path):
             result = subprocess.run([str(v) for v in args], cwd=root, env=env, stdout=output,
                                     stderr=subprocess.STDOUT, timeout=120)
             output.seek(0)
-            assert result.returncode == 0, output.read()
+            diagnostics = root / 'control-diagnostics.log'
+            assert result.returncode == 0, output.read() + (diagnostics.read_text() if diagnostics.exists() else '')
             output.seek(0)
             return output.read()
 
@@ -51,14 +52,17 @@ def test_actual_scheduled_recovery_and_preserved_stop(tmp_path):
              'env': {'PM2_HOME': str(root / '.pm2')}}]
     (root / 'ecosystem.config.js').write_text('module.exports=' + json.dumps({'apps': apps}) + ';')
     # Direct API callbacks and explicit exit avoid unrelated CLI shutdown handles.
-    (root / 'control.cjs').write_text("""
+    (root / 'control.cjs').write_text(r"""
 require('./scripts/pm2_namespace.cjs');
 const pm2=require('./tools/pm2/node_modules/pm2');
 const action=process.argv[2];
-const timer=setTimeout(()=>process.exit(2),30000);
+const trace=stage=>require('node:fs').appendFileSync('control-diagnostics.log',new Date().toISOString()+' '+stage+' '+action+'\n');
+trace('connecting');
+const timer=setTimeout(()=>{trace('timed out');process.exit(2);},30000);
 pm2.connect(error=>{
+ trace('connected');
  if(error)process.exit(1);
- const done=(error,value)=>{clearTimeout(timer);pm2.disconnect();if(error)process.exit(1);console.log(JSON.stringify(value));process.exit(0);};
+ const done=(error,value)=>{trace('finished');clearTimeout(timer);pm2.disconnect();if(error)process.exit(1);console.log(JSON.stringify(value));process.exit(0);};
  if(action==='start')pm2.start('./ecosystem.config.js',done);
  else if(action==='stop')pm2.stop('synthetic-recovery',done);
  else if(action==='save')pm2.dump(done);

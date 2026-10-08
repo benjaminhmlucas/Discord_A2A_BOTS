@@ -77,6 +77,7 @@ npm audit --prefix tools/pm2
 ```
 
 Run `scripts/start.ps1`. Startup invokes Node directly with the configured local PM2 entry, uses a dedicated `.pm2` directory inside this checkout, installs log rotation with the same dependency overrides, verifies its Boolean parser fix, and starts the configured processes. It does not register a login startup task or save the process list automatically. The pinned Chokidar 4 watcher supports literal paths; glob-based PM2 watch configuration is unsupported. Bot services use `watch: false`.
+
 7. Inspect `.pm2/logs/` and `runtime_state/setup_health.json`. After all enabled identities are connected and healthy, save the list in the same PowerShell session:
 
 ```powershell
@@ -128,7 +129,7 @@ node --test --experimental-test-coverage --test-coverage-lines=100 --test-covera
 
 Both unit tests and setup integration tests are required. Coverage must be exactly 100% of statements and branch outcomes in every shipped Python module, with no coverage exclusions. JavaScript production configuration must also pass 100% line, branch and function coverage. See [testing procedures](docs/TESTING.md) for the native Windows installation, PowerShell, process-protection and 1 GB log-budget checks.
 
-Default tests use fake Discord destinations and AI consumers, alongside real Windows PM2 daemons, npm/module installation, log rotation and process supervision. They do not contact Discord or consume AI credits. Windows native tests require PowerShell 7, Node 24.15.0, npm and the Python 3.11 launcher; they install dependencies into a temporary checkout. Explicit private opt-in tests additionally verify real authenticated providers. The GitHub Actions workflow runs the default checks on pushes and pull requests; its hosted execution still needs verification after upload.
+Default tests use fake Discord destinations and AI consumers, alongside real Windows PM2 daemons, npm/module installation, log rotation and process supervision. They do not contact Discord or consume AI credits. Windows native tests require PowerShell 7, Node 24.15.0, npm and the Python 3.11 launcher; they install dependencies into a temporary checkout. Explicit private opt-in tests additionally verify real authenticated providers. The GitHub Actions workflow runs the default checks on pushes and pull requests. Check the Actions results for the exact commit before deploying it.
 
 ## Publication
 
