@@ -5,6 +5,38 @@ const os = require('node:os');
 const path = require('node:path');
 require('../scripts/pm2_namespace.cjs');
 
+test('managed PM2 client opts into metadata RPC without changing normal monitoring or other calls', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'metadata-client-'));
+  const prior = process.env.BOTBRIDGE_PM2_METADATA_ONLY;
+  try {
+    for (const directory of ['pm2/lib', 'unrelated/lib', 'pm2/Other']) {
+      fs.mkdirSync(path.join(root, directory), {recursive:true});
+      fs.writeFileSync(path.resolve(root, directory, '../package.json'), JSON.stringify({name:'pm2',version:'7.0.1'}));
+      const entry = path.join(root, directory, 'Client.js');
+      fs.writeFileSync(entry, 'module.exports = class Client { executeRemote(method, env, cb) { cb(null, {method, env, owner:this}); } };');
+      const Client = require(entry);
+      const method = Client.prototype.executeRemote;
+      assert.equal(require(entry).prototype.executeRemote, method); // Cached load never wraps again.
+      const client = new Client();
+      for (const flag of ['0', '1']) for (const rpc of ['getMonitorData', 'restartProcessId']) {
+        process.env.BOTBRIDGE_PM2_METADATA_ONLY = flag;
+        const env = {id:42};
+        client.executeRemote(rpc, env, (error, value) => {
+          assert.equal(error, null);
+          assert.equal(value.owner, client);
+          assert.deepEqual(value.env, directory === 'pm2/lib' && flag === '1' && rpc === 'getMonitorData'
+            ? {id:42, botbridge_metadata_only:true} : env);
+          assert.deepEqual(env, {id:42});
+        });
+      }
+    }
+  } finally {
+    if (prior === undefined) delete process.env.BOTBRIDGE_PM2_METADATA_ONLY;
+    else process.env.BOTBRIDGE_PM2_METADATA_ONLY = prior;
+    fs.rmSync(root, {recursive:true,force:true});
+  }
+});
+
 test('recovery metadata RPC skips WMI while normal metrics and unrelated modules are preserved', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'metadata-rpc-'));
   try {

@@ -82,6 +82,25 @@ def manage(action, root=ROOT, pm2_args=()):
     if not Path(node).is_file() or not entry.is_file():
         raise RuntimeError("Configure Node and install the checkout-local PM2 CLI before starting")
     # Direct Node invocation preserves paths containing spaces or shell metacharacters.
+    # Management needs identities/status, not potentially blocking Windows WMI metrics.
+    # Explicit opt-in also covers module clients; normal operator monitoring is unchanged.
+    if action == "start" or (
+        pm2_args
+        and pm2_args[0]
+        in (
+            "start",
+            "restart",
+            "stop",
+            "delete",
+            "kill",
+            "save",
+            "resurrect",
+            "install",
+            "set",
+            "multiset",
+        )
+    ):
+        env["BOTBRIDGE_PM2_METADATA_ONLY"] = "1"
     pm2 = [node, entry]
     if action == "pm2":
         run([*pm2, *pm2_args], root, env)

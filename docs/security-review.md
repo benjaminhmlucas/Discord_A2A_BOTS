@@ -30,6 +30,10 @@ environment and both locked PM2/logrotate graphs, failing on any known advisory.
 PM2's namespace adapter patches the internal `God.getMonitorData` method for
 metadata-only recovery queries. Every PM2 upgrade must revalidate that internal
 contract using actual daemon-loss and lifecycle tests, including normal monitoring.
+The managed CLI explicitly sets `BOTBRIDGE_PM2_METADATA_ONLY=1` so process-name
+lookup and operation summaries use metadata instead of blocking Windows WMI metrics.
+This requires the pinned Client.executeRemote adapter too. Direct PM2 monitoring
+without this opt-in retains normal CPU/memory collection.
 The adapter intentionally requires PM2 7.0.1. A dependency update that
 changes this version must update and retest the adapter and both npm manifests
 together. The production logrotate installer copies the committed manifest and integrity

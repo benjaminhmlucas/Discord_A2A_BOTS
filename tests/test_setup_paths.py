@@ -162,6 +162,20 @@ def test_start_complete_order_no_shell_and_no_automatic_save(tmp_path, absolute)
         )
 
 
+@pytest.mark.parametrize(
+    "arguments,expected", [([], "0"), (["list"], "0"), (["restart", "synthetic"], "1")]
+)
+def test_manage_metadata_mode_is_limited_to_operations(tmp_path, arguments, expected):
+    installation(tmp_path)
+    with (
+        patch.dict(os.environ, {"BOTBRIDGE_PM2_METADATA_ONLY": "0"}),
+        patch.object(manage, "run") as run,
+        patch.object(manage.shutil, "which", return_value=None),
+    ):
+        manage.manage("pm2", tmp_path, arguments)
+    assert run.call_args.args[2]["BOTBRIDGE_PM2_METADATA_ONLY"] == expected
+
+
 def test_start_requires_python_node_and_pm2(tmp_path):
     with pytest.raises(ValueError):
         manage.manage("unrecognized", tmp_path)

@@ -37,6 +37,21 @@ Module._load = function (request, parent, isMain) {
     } };
   }
   const file = Module._resolveFilename(request, parent, isMain);
+  if (path.basename(file) === 'Client.js' && path.basename(path.dirname(file)) === 'lib' &&
+      path.basename(path.resolve(path.dirname(file), '..')) === 'pm2') {
+    validate(path.resolve(path.dirname(file), '..'));
+    const original = value.prototype.executeRemote;
+    if (!original.botbridgeMetadataOnly) {
+      const execute = function (method, environment, callback) {
+        const metadata = process.env.BOTBRIDGE_PM2_METADATA_ONLY === '1' && method === 'getMonitorData';
+        return original.call(this, method,
+          metadata ? {...environment, botbridge_metadata_only: true} : environment, callback);
+      };
+      execute.botbridgeMetadataOnly = true;
+      value.prototype.executeRemote = execute;
+    }
+    return value;
+  }
   if (path.basename(file) === 'ActionMethods.js' && path.basename(path.dirname(file)) === 'God' &&
       path.basename(path.resolve(path.dirname(file), '../..')) === 'pm2') {
     validate(path.resolve(path.dirname(file), '../..'));

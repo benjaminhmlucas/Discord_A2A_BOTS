@@ -30,6 +30,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
     env["PM2_HOME"] = str(root / ".pm2")
     env["PM2_NO_INTERACTION"] = "true"
     env["PM2_SILENT"] = "true"
+    env["BOTBRIDGE_PM2_METADATA_ONLY"] = "1"
     env["NODE_OPTIONS"] = "--require=" + json.dumps(str(root / "scripts/pm2_namespace.cjs"))
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     wheels = os.environ.get("BOTBRIDGE_TEST_WHEELS")
