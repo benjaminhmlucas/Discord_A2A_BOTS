@@ -8,4 +8,6 @@ Keep configuration and credentials out of source. Add regression tests for chang
 
 Preserve the Windows duplicate-process mutex and kill-on-close job. Review CLI flags against the installed version before changing provider behavior. Keep public chat free of local execution tools and inherited integrations.
 
-The owner should choose a license and enable private vulnerability reporting before accepting external contributions.
+Pull requests need an independent approval of the latest push, resolved conversations and all required checks. Review approvals are dismissed when code changes. The enforced default-branch ruleset has no bypass list. See [security review policy](docs/security-review.md); MIT licensing and private vulnerability reporting are configured.
+
+Run `ruff check .`, `ruff format --check .`, `mypy`, `bandit -r . -c pyproject.toml -ll`, and `python -m pip_audit --strict` after installing development requirements. Audit both locked npm manifests with `npm ci --ignore-scripts --prefix dependencies/pm2`, `npm audit --prefix dependencies/pm2 --audit-level=low` and the equivalent commands for `dependencies/logrotate`. CI also runs extended CodeQL analysis for Python and JavaScript. Type checking currently covers the provider contract and health I/O boundary; expand it when changing additional interfaces.

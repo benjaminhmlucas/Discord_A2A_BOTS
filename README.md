@@ -72,8 +72,8 @@ ClaudeBot uses `CLAUDE_CODE_OAUTH_TOKEN`; a CLI login alone does not populate th
 
 ```powershell
 New-Item -ItemType Directory -Force tools/pm2 | Out-Null
-Copy-Item scripts/pm2-package.json tools/pm2/package.json
-Copy-Item scripts/pm2-package-lock.json tools/pm2/package-lock.json
+Copy-Item dependencies/pm2/package.json tools/pm2/package.json
+Copy-Item dependencies/pm2/package-lock.json tools/pm2/package-lock.json
 npm ci --prefix tools/pm2
 npm audit --prefix tools/pm2
 ```
@@ -89,7 +89,7 @@ Run `scripts/start.ps1`. Startup invokes Node directly with the configured local
 
 Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.1 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
 
-The preloader rejects other PM2 versions and pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
+The preloader rejects other PM2 versions and installs logrotate from its committed integrity lock using npm ci with lifecycle scripts disabled. This also pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
 
 PM2 7.0.1 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
 
@@ -136,6 +136,23 @@ node --test --experimental-test-coverage --test-coverage-lines=100 --test-covera
 Both unit tests and setup integration tests are required. Coverage must be exactly 100% of statements and branch outcomes in every shipped Python module, with no coverage exclusions. JavaScript production configuration must also pass 100% line, branch and function coverage. See [testing procedures](docs/TESTING.md) for the native Windows installation, PowerShell, process-protection and 1 GB log-budget checks.
 
 Default tests use fake Discord destinations and AI consumers, alongside real Windows PM2 daemons, npm/module installation, log rotation and process supervision. They do not contact Discord or consume AI credits. Windows native tests require PowerShell 7, Node 24.15.0, npm and the Python 3.11 launcher; they install dependencies into a temporary checkout. Explicit private opt-in tests additionally verify real authenticated providers. The GitHub Actions workflow runs the default checks on pushes and pull requests. Check the Actions results for the exact commit before deploying it.
+
+## CI and merge policy
+
+Enable a main-branch ruleset requiring an independently approved pull request,
+fresh approval after code changes, resolved review conversations and all required
+checks on an up-to-date branch. Block force pushes and deletion with no bypass
+list. Verify these repository settings; workflow files alone do not enforce them. CI pins action
+commits and runs formatting/lint, strict boundary type checks, Bandit, Python/npm
+audits, CodeQL, both supported OS suites and exact coverage gates. Dependabot proposes
+weekly dependency/action updates. See [the security review policy](docs/security-review.md)
+and [contribution checks](CONTRIBUTING.md).
+
+Persistent request limits default to six human requests per minute across bots,
+30 provider calls per bot per minute and 200 per bot per rolling day. Configure
+`user_requests_per_minute`, `bot_requests_per_minute`, and `bot_requests_per_day`
+in ignored local configuration, then restart. These are request counts, not billing
+caps. Work prompts contain only the authenticated owner's explicit text.
 
 ## Publication
 

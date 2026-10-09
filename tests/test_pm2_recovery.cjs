@@ -9,14 +9,17 @@ const recovery = require('../scripts/pm2_recovery.cjs');
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-contract-'));
   fs.mkdirSync(path.join(root, '.pm2'));
-  const apps = [{name: 'synthetic', script: path.join(root, 'pythonw.exe'), cwd: root}];
+  const apps = [{name: 'synthetic', script: path.join(root, 'pythonw.exe'), cwd: root,
+    args: 'worker.py --safe', interpreter: 'none'}];
   const dump = [{name: 'synthetic', pm_exec_path: apps[0].script, pm_cwd: root,
-    PM2_HOME: path.join(root, '.pm2'), windowsHide: true}];
+    PM2_HOME: path.join(root, '.pm2'), windowsHide: true, args: ['worker.py', '--safe'], exec_interpreter: 'none'}];
   const save = () => fs.writeFileSync(path.join(root, '.pm2/dump.pm2'), JSON.stringify(dump));
   save();
   let rows = [{name: 'synthetic', pid: 42, pm2_env: {status: 'online'}}];
   const counts = {restore: 0, disconnect: 0, connect: 0};
-  const pm2 = {Client: {pingDaemon: cb => cb(true)},
+  const pm2 = {Client: {pingDaemon: cb => cb(true), executeRemote: (method, options, cb) => {
+    assert.equal(method, 'getMonitorData'); assert.deepEqual(options, {botbridge_metadata_only: true}); pm2.list(cb);
+  }},
     connect: cb => {counts.connect++; cb(null);},
     list: cb => cb(null, rows),
     resurrect: cb => {counts.restore++; rows = [{name: 'synthetic', pid: 43, pm2_env: {status: 'online'}}]; cb(null);},
@@ -58,7 +61,7 @@ test('pause, live no-op, dead-daemon restore, missing-service restore and fatal-
   } finally {f.cleanup();}
 });
 
-for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'home', 'hide']) {
+for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'home', 'hide', 'args', 'interpreter']) {
   test('reject unsafe or obsolete dump: ' + fault, () => {
     const f = fixture();
     try {
@@ -71,9 +74,11 @@ for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'h
         if (fault === 'cwd') f.dump[0].pm_cwd += '-other';
         if (fault === 'home') f.dump[0].PM2_HOME += '-other';
         if (fault === 'hide') f.dump[0].windowsHide = false;
+        if (fault === 'args') f.dump[0].args = 'other.py --safe';
+        if (fault === 'interpreter') f.dump[0].exec_interpreter = 'node';
         f.save();
       }
-      assert.throws(() => recovery.validateDump(f.root, f.apps), /roster|paths/);
+      assert.throws(() => recovery.validateDump(f.root, f.apps), /roster|paths|arguments/);
     } finally {f.cleanup();}
   });
 }
@@ -97,6 +102,72 @@ test('callback/list/restore failures recorded and clients disconnected', async (
     recovery.record(f.root, {status: 'ok'});
     assert.equal(fs.statSync(path.join(f.root, '.pm2/recovery.log.1')).size, 65001);
     assert.ok(fs.statSync(path.join(f.root, '.pm2/recovery.log')).size < 1000);
+  } finally {f.cleanup();}
+});
+
+test('journal keeps its open file identity during a concurrent pathname replacement', () => {
+  const f = fixture();
+  const stat = fs.fstatSync;
+  const log = path.join(f.root, '.pm2/recovery.log');
+  const held = log + '.held';
+  fs.writeFileSync(log, 'old entry\n');
+  try {
+    fs.fstatSync = descriptor => {
+      const result = stat(descriptor);
+      fs.renameSync(log, held);
+      fs.writeFileSync(log, 'SYNTHETIC-UNRELATED');
+      return result;
+    };
+    recovery.record(f.root, {status:'ok'});
+    assert.equal(fs.readFileSync(log, 'utf8'), 'SYNTHETIC-UNRELATED');
+    assert.match(fs.readFileSync(held, 'utf8'), /"status":"ok"/);
+  } finally {
+    fs.fstatSync = stat;
+    f.cleanup();
+  }
+});
+
+test('state replacement retries sharing conflicts and preserves the old snapshot on exhaustion', () => {
+  const f = fixture();
+  const rename = fs.renameSync;
+  const destination = path.join(f.root, '.pm2/recovery_state.json');
+  try {
+    for (const code of ['EPERM', 'EACCES', 'EBUSY']) {
+      let attempts = 0;
+      fs.renameSync = (...args) => {
+        if (++attempts < 3) throw Object.assign(new Error('sharing conflict'), {code});
+        return rename(...args);
+      };
+      recovery.record(f.root, {status: 'ok'});
+      assert.equal(attempts, 3);
+      assert.equal(JSON.parse(fs.readFileSync(destination)).status, 'ok');
+    }
+    for (const code of ['EPERM', 'ENOENT']) {
+      let attempts = 0;
+      fs.renameSync = () => { attempts++; throw Object.assign(new Error('cannot replace'), {code}); };
+      assert.throws(() => recovery.record(f.root, {status:'new'}), /cannot replace/);
+      assert.equal(attempts, code === 'EPERM' ? 3 : 1);
+      assert.equal(JSON.parse(fs.readFileSync(destination)).status, 'ok');
+    }
+  } finally {
+    fs.renameSync = rename;
+    f.cleanup();
+  }
+});
+
+test('rejects stale restart policy and validates PM2 string arguments', () => {
+  const f = fixture();
+  try {
+    f.dump[0].args = 'worker.py --safe';
+    recovery.validateDump(f.root, f.apps);
+    for (const [key, value] of Object.entries({autorestart: true, watch: false,
+      restart_delay: 5000, max_restarts: 10, stop_exit_codes: [75, 78, 103]})) {
+      f.apps[0][key] = value;
+      assert.throws(() => recovery.validateDump(f.root, f.apps), /restart policy/);
+      f.dump[0][key] = value;
+      f.save();
+      recovery.validateDump(f.root, f.apps);
+    }
   } finally {f.cleanup();}
 });
 

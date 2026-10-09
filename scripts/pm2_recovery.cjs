@@ -26,6 +26,16 @@ function validateDump(root, apps) {
         path.resolve(row.PM2_HOME) !== path.join(root, '.pm2') ||
         row.windowsHide !== true)
       throw new Error('Saved process paths or hidden-window policy do not match ecosystem');
+    // PM2 serializes a string of arguments as an array. These ecosystem arguments
+    // deliberately contain no shell quoting; compare tokens and preserve their order.
+    const args = value => Array.isArray(value) ? value : String(value).split(/\s+/);
+    if (JSON.stringify(args(row.args)) !== JSON.stringify(args(app.args)) ||
+        row.exec_interpreter !== app.interpreter)
+      throw new Error('Saved process arguments or interpreter do not match ecosystem');
+    for (const key of ['autorestart', 'watch', 'restart_delay', 'max_restarts', 'stop_exit_codes']) {
+      if (app[key] !== undefined && JSON.stringify(row[key]) !== JSON.stringify(app[key]))
+        throw new Error('Saved restart policy does not match ecosystem');
+    }
   }
 }
 
@@ -37,12 +47,13 @@ async function recover(root, apps, pm2) {
   if (!alive) validateDump(root, apps);
   await call(done => pm2.connect(done));
   try {
-    let rows = await call(done => pm2.list(done));
+    const list = done => pm2.Client.executeRemote('getMonitorData', {botbridge_metadata_only: true}, done);
+    let rows = await call(list);
     const missing = apps.some(app => !rows.some(row => row.name === app.name));
     if (missing) {
       validateDump(root, apps);
       await call(done => pm2.resurrect(done));
-      rows = await call(done => pm2.list(done));
+      rows = await call(list);
     }
     const healthy = apps.every(app => rows.some(row => row.name === app.name && row.pm2_env.status === 'online'));
     return {status: healthy ? 'ok' : 'degraded', recovered: missing,
@@ -60,12 +71,32 @@ function record(root, report) {
   const destination = path.join(home, 'recovery_state.json');
   const temporary = destination + '.tmp';
   fs.writeFileSync(temporary, JSON.stringify(report, null, 2));
-  fs.renameSync(temporary, destination);
+  let attempt = 0;
+  while (true) {
+    try {
+      fs.renameSync(temporary, destination);
+      break;
+    } catch (error) {
+      attempt++;
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt === 3) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
   // Bounded local journal, independent of the possibly dead aggregate manager.
   const log = path.join(home, 'recovery.log');
-  if (fs.existsSync(log) && fs.statSync(log).size > 64000)
-    fs.renameSync(log, log + '.1');
-  fs.appendFileSync(log, JSON.stringify(report) + '\n');
+  // Inspect and update the same open file even if its pathname changes concurrently.
+  const descriptor = fs.openSync(log, fs.constants.O_CREAT | fs.constants.O_RDWR);
+  try {
+    let size = fs.fstatSync(descriptor).size;
+    if (size > 64000) {
+      fs.writeFileSync(log + '.1', fs.readFileSync(descriptor));
+      fs.ftruncateSync(descriptor, 0);
+      size = 0;
+    }
+    fs.writeSync(descriptor, JSON.stringify(report) + '\n', size);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 async function main(root, pm2, apps) {
@@ -76,7 +107,9 @@ async function main(root, pm2, apps) {
     report = {status: 'error', recovered: false, error: error.message};
   }
   record(root, report);
-  return report.status === 'error' ? 1 : 0;
+  // A missing daemon can be restored; a stopped/fatal service needs operator repair.
+  // Surface degradation to Task Scheduler without restarting an intentionally stopped bot.
+  return ['error', 'degraded'].includes(report.status) ? 1 : 0;
 }
 
 module.exports = {call, validateDump, recover, record, main};

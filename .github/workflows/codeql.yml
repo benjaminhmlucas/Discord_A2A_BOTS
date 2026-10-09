@@ -1,0 +1,89 @@
+name: CodeQL
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 8 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          category: '/language:${{ matrix.language }}'
+          output: '${{ runner.temp }}/codeql-results'
+      - name: Block medium and higher security findings
+        env:
+          SARIF_DIRECTORY: '${{ runner.temp }}/codeql-results'
+        run: |
+          python - <<'PY'
+          import json, math, os
+          from pathlib import Path
+          reports = list(Path(os.environ['SARIF_DIRECTORY']).glob('*.sarif'))
+          if not reports:
+              raise SystemExit('CodeQL produced no SARIF report')
+          blocked = 0
+          unresolved = 0
+          for report in reports:
+              for run in json.loads(report.read_text())['runs']:
+                  tool = run['tool']
+                  components = [tool['driver'], *tool.get('extensions', [])]
+                  for result in run.get('results', []):
+                      reference = result.get('rule', {})
+                      component_ref = reference.get('toolComponent', {})
+                      rule_id = reference.get('id', result.get('ruleId'))
+                      index = reference.get('index', result.get('ruleIndex'))
+                      try:
+                          if 'index' in component_ref:
+                              component_index = component_ref['index']
+                              if type(component_index) is not int or component_index < 0:
+                                  raise ValueError('Invalid extension index')
+                              candidates = [tool.get('extensions', [])[component_index]]
+                          elif component_ref:
+                              candidates = [c for c in components if all(c.get(k) == v for k, v in component_ref.items())]
+                          else:
+                              candidates = components if index is None else [tool['driver']]
+                          if index is not None:
+                              if type(index) is not int or index < 0 or len(candidates) != 1:
+                                  raise ValueError('Invalid rule index')
+                              rules = [candidates[0].get('rules', [])[index]]
+                          else:
+                              rules = [r for c in candidates for r in c.get('rules', []) if rule_id is not None and r.get('id') == rule_id]
+                          if len(rules) != 1 or (rule_id is not None and rules[0].get('id') != rule_id):
+                              raise ValueError('Unknown, ambiguous or inconsistent rule reference')
+                          severity = float(rules[0].get('properties', {}).get('security-severity', '0'))
+                          if not math.isfinite(severity) or not 0 <= severity <= 10:
+                              raise ValueError('Invalid security severity')
+                      except (IndexError, ValueError, TypeError) as error:
+                          print(f'Unresolved CodeQL rule {rule_id!r}: {error}')
+                          unresolved += 1
+                          continue
+                      blocked += result.get('level') == 'error' or severity >= 4
+          print(f'Blocking CodeQL findings: {blocked}')
+          print(f'Unresolved CodeQL findings: {unresolved}')
+          raise SystemExit(bool(blocked or unresolved))
+          PY
