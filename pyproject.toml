@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["tools", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture configuration must be installed before importing identity-dependent modules.
+"tests/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["bridge_contracts.py", "bridge_health_io.py"]
+strict = true
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "tools", "node_modules"]

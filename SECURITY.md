@@ -16,7 +16,9 @@ This is a source template, not a complete security audit or guarantee. Literal r
 
 The local-work feature gives the provider access to its configured memory workspace. Keep it disabled unless you deliberately accept that capability and trust the owner account. A compromised owner account may issue authenticated requests.
 
-Trusted users can consume provider quotas. Queue limits do not provide per-user rate limits or billing caps. Keep the allowlist small and the bridge channel restricted. A public repository does not need a public Discord invite.
+Trusted users can consume provider quotas. Persistent per-user and per-bot rolling request limits bound provider attempts, including discussion turns, but do not measure tokens or currency. Keep the allowlist small, configure provider-side spend limits and restrict the bridge channel. A public repository does not need a public Discord invite.
+
+Unreadable privacy folders or files stop submission; links and reparse points are rejected. Tool-enabled work excludes channel history, display names, attachments and curated public context. Unauthorized humans are ignored before command-denial replies. See [security controls and review policy](docs/security-review.md) for CI gates, request-limit defaults and recovery behavior.
 
 The 1 GB budget is retention enforced by periodic cleanup, not a filesystem quota. Temporary overshoot is possible; disk monitoring and bounded writers remain necessary. The log manager only scans configured top-level log scopes and never recursively searches unrelated files.
 

@@ -4,6 +4,15 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const config = require('../ecosystem.config.js');
 
+test('installed logrotate and its audited lock share the pinned PM2 override policy', () => {
+  const pm2 = require('../dependencies/pm2/package.json');
+  const rotate = require('../dependencies/logrotate/package.json');
+  const lock = require('../dependencies/logrotate/package-lock.json');
+  assert.deepEqual(rotate.overrides, pm2.overrides);
+  assert.deepEqual(rotate.dependencies, {'pm2-logrotate': '3.0.0'});
+  assert.equal(lock.packages['node_modules/pm2'].version, '7.0.1');
+});
+
 test('ecosystem uses only this checkout and bounded restart policies', () => {
   assert.deepEqual(config.apps.map(a => a.name), [
     'codexbot', 'antigravitybot', 'claudebot', 'botbridge-log-manager', 'botbridge-health'

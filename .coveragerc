@@ -6,6 +6,7 @@ omit =
     tests/*
     .venv/*
     tools/*
+    dependencies/*/node_modules/*
 
 [report]
 precision = 2
