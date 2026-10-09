@@ -1,4 +1,5 @@
 """Transactional, content-free handoff and duplicate-message state."""
+
 import re
 import secrets
 import sqlite3
@@ -16,13 +17,15 @@ class State:
         self.path, self.config = str(path), config
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            db.executescript('''
+            db.executescript("""
             CREATE TABLE IF NOT EXISTS seen(bot INTEGER, message INTEGER, at REAL,
               PRIMARY KEY(bot,message));
             CREATE TABLE IF NOT EXISTS discussions(id TEXT PRIMARY KEY, channel INTEGER,
               origin INTEGER, remaining INTEGER, target INTEGER, sender INTEGER,
               token TEXT, busy INTEGER, expires REAL, status TEXT);
-            ''')
+            CREATE TABLE IF NOT EXISTS request_budget(bot INTEGER, author INTEGER, at REAL);
+            CREATE INDEX IF NOT EXISTS request_budget_time ON request_budget(at);
+            """)
 
     @contextmanager
     def connect(self):
@@ -36,62 +39,118 @@ class State:
 
     def seen(self, bot, message):
         with self.connect() as db:
-            db.execute('DELETE FROM seen WHERE at < ?', (time.time() - 86400,))
-            db.execute('DELETE FROM discussions WHERE expires < ?', (time.time() - 86400,))
-            db.execute('DELETE FROM seen WHERE rowid IN (SELECT rowid FROM seen ORDER BY at DESC LIMIT -1 OFFSET 20000)')
-            return db.execute('INSERT OR IGNORE INTO seen VALUES (?,?,?)',
-                              (bot, message, time.time())).rowcount == 0
+            db.execute("DELETE FROM seen WHERE at < ?", (time.time() - 86400,))
+            db.execute("DELETE FROM discussions WHERE expires < ?", (time.time() - 86400,))
+            db.execute(
+                "DELETE FROM seen WHERE rowid IN (SELECT rowid FROM seen ORDER BY at DESC LIMIT -1 OFFSET 20000)"
+            )
+            return (
+                db.execute(
+                    "INSERT OR IGNORE INTO seen VALUES (?,?,?)", (bot, message, time.time())
+                ).rowcount
+                == 0
+            )
+
+    def reserve_request(self, bot, author):
+        """Content-free rolling limits persist across restarts and serialize consumers."""
+        now = time.time()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM request_budget WHERE at < ?", (now - 86400,))
+            minute, day = db.execute(
+                "SELECT sum(at > ?), count(*) FROM request_budget WHERE bot=?", (now - 60, bot)
+            ).fetchone()
+            user = db.execute(
+                "SELECT count(*) FROM request_budget WHERE author=? AND at > ?", (author, now - 60)
+            ).fetchone()[0]
+            if (
+                (minute or 0) >= self.config["bot_requests_per_minute"]
+                or day >= self.config["bot_requests_per_day"]
+                or (author is not None and user >= self.config["user_requests_per_minute"])
+            ):
+                return False
+            db.execute("INSERT INTO request_budget VALUES (?,?,?)", (bot, author, now))
+            return True
 
     def start(self, message, bot, turns):
         sid = secrets.token_hex(16)
         with self.connect() as db:
-            db.execute('INSERT INTO discussions VALUES (?,?,?,?,?,?,?,?,?,?)',
-                       (sid, message.channel.id, message.id, turns, bot, 0,
-                        '', 1, time.time() + self.config['handoff_seconds'], 'active'))
+            db.execute(
+                "INSERT INTO discussions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    sid,
+                    message.channel.id,
+                    message.id,
+                    turns,
+                    bot,
+                    0,
+                    "",
+                    1,
+                    time.time() + self.config["handoff_seconds"],
+                    "active",
+                ),
+            )
         return sid, turns
 
     def root_message(self, sid):
         with self.connect() as db:
-            row = db.execute('SELECT origin FROM discussions WHERE id=?', (sid,)).fetchone()
+            row = db.execute("SELECT origin FROM discussions WHERE id=?", (sid,)).fetchone()
             if not row:
-                raise RuntimeError('Unknown discussion')
+                raise RuntimeError("Unknown discussion")
             return row[0]
 
     def claim(self, message, bot):
-        match = MARKER.search(message.content or '')
+        match = MARKER.search(message.content or "")
         if not match or not message.author.bot:
             return None
         sid, token, n = match.groups()
         n = int(n)
-        if not 1 <= n <= self.config['max_turns']:
+        if not 1 <= n <= self.config["max_turns"]:
             return None
-        if bot not in self.config['enabled_bots'] or message.author.id not in self.config['enabled_bots']:
+        if (
+            bot not in self.config["enabled_bots"]
+            or message.author.id not in self.config["enabled_bots"]
+        ):
             return None
         with self.connect() as db:
-            updated = db.execute('''UPDATE discussions SET busy=1, token='', expires=?
+            updated = db.execute(
+                """UPDATE discussions SET busy=1, token='', expires=?
                 WHERE id=? AND channel=? AND target=? AND sender=? AND token=?
-                AND remaining=? AND busy=0 AND expires>? AND status='active' ''',
-                (time.time() + self.config['handoff_seconds'], sid, message.channel.id,
-                 bot, message.author.id, token, n, time.time())).rowcount
+                AND remaining=? AND busy=0 AND expires>? AND status='active' """,
+                (
+                    time.time() + self.config["handoff_seconds"],
+                    sid,
+                    message.channel.id,
+                    bot,
+                    message.author.id,
+                    token,
+                    n,
+                    time.time(),
+                ),
+            ).rowcount
             return (sid, n) if updated else None
 
     def advance(self, sid, bot, target):
         with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT * FROM discussions WHERE id=?', (sid,)).fetchone()
-            if not row or row['status'] != 'active' or not row['busy'] or row['target'] != bot:
-                raise RuntimeError('Invalid discussion transition')
-            n = row['remaining'] - 1
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM discussions WHERE id=?", (sid,)).fetchone()
+            if not row or row["status"] != "active" or not row["busy"] or row["target"] != bot:
+                raise RuntimeError("Invalid discussion transition")
+            n = row["remaining"] - 1
             if not n or target is None:
-                db.execute("UPDATE discussions SET status='complete',busy=0,token='' WHERE id=?", (sid,))
+                db.execute(
+                    "UPDATE discussions SET status='complete',busy=0,token='' WHERE id=?", (sid,)
+                )
                 return None
-            if target not in self.config['enabled_bots'] or target == bot:
-                raise RuntimeError('Invalid discussion target')
+            if target not in self.config["enabled_bots"] or target == bot:
+                raise RuntimeError("Invalid discussion target")
             token = secrets.token_hex(16)
-            db.execute('''UPDATE discussions SET remaining=?,target=?,sender=?,token=?,busy=0,
-                expires=? WHERE id=?''', (n, target, bot, token,
-                                         time.time() + self.config['handoff_seconds'], sid))
-            return f'`[bridge:{sid}:{token}:{n}]`'
+            db.execute(
+                """UPDATE discussions SET remaining=?,target=?,sender=?,token=?,busy=0,
+                expires=? WHERE id=?""",
+                (n, target, bot, token, time.time() + self.config["handoff_seconds"], sid),
+            )
+            return f"`[bridge:{sid}:{token}:{n}]`"
 
     def fail(self, sid):
         with self.connect() as db:
@@ -99,9 +158,13 @@ class State:
 
     def expired(self):
         with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            rows = db.execute("SELECT id,channel FROM discussions WHERE status='active' AND expires<?",
-                              (time.time(),)).fetchall()
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT id,channel FROM discussions WHERE status='active' AND expires<?",
+                (time.time(),),
+            ).fetchall()
             for row in rows:
-                db.execute("UPDATE discussions SET status='expired',token='' WHERE id=?", (row['id'],))
+                db.execute(
+                    "UPDATE discussions SET status='expired',token='' WHERE id=?", (row["id"],)
+                )
             return [dict(r) for r in rows]

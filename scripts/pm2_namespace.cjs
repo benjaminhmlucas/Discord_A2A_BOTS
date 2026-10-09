@@ -25,7 +25,7 @@ Module._load = function (request, parent, isMain) {
         const expected = path.resolve(process.env.PM2_HOME, 'modules', 'pm2-logrotate');
         if (index < 0 || typeof prefix !== 'string' || path.resolve(prefix) !== expected)
           throw new Error('Refusing an unexpected logrotate installation directory');
-        const policy = require('./pm2-package.json');
+        const policy = require('../dependencies/pm2/package.json');
         fs.writeFileSync(path.join(expected, 'package.json'), JSON.stringify({
           private: true, dependencies: { 'pm2-logrotate': '3.0.0' }, overrides: policy.overrides
         }));

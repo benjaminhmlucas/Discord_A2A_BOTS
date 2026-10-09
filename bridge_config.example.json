@@ -22,5 +22,8 @@
     "claude": 0
   },
   "allowed_user_ids": [],
-  "allow_work": false
+  "allow_work": false,
+  "user_requests_per_minute": 6,
+  "bot_requests_per_minute": 30,
+  "bot_requests_per_day": 200
 }

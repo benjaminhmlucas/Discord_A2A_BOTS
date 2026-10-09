@@ -27,5 +27,8 @@
   "allowed_user_ids": [
     201
   ],
-  "allow_work": true
+  "allow_work": true,
+  "user_requests_per_minute": 120,
+  "bot_requests_per_minute": 120,
+  "bot_requests_per_day": 500
 }

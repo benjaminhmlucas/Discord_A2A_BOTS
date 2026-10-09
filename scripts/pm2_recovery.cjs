@@ -26,6 +26,16 @@ function validateDump(root, apps) {
         path.resolve(row.PM2_HOME) !== path.join(root, '.pm2') ||
         row.windowsHide !== true)
       throw new Error('Saved process paths or hidden-window policy do not match ecosystem');
+    // PM2 serializes a string of arguments as an array. These ecosystem arguments
+    // deliberately contain no shell quoting; compare tokens and preserve their order.
+    const args = value => Array.isArray(value) ? value : String(value).split(/\s+/);
+    if (JSON.stringify(args(row.args)) !== JSON.stringify(args(app.args)) ||
+        row.exec_interpreter !== app.interpreter)
+      throw new Error('Saved process arguments or interpreter do not match ecosystem');
+    for (const key of ['autorestart', 'watch', 'restart_delay', 'max_restarts', 'stop_exit_codes']) {
+      if (app[key] !== undefined && JSON.stringify(row[key]) !== JSON.stringify(app[key]))
+        throw new Error('Saved restart policy does not match ecosystem');
+    }
   }
 }
 
@@ -76,7 +86,9 @@ async function main(root, pm2, apps) {
     report = {status: 'error', recovered: false, error: error.message};
   }
   record(root, report);
-  return report.status === 'error' ? 1 : 0;
+  // A missing daemon can be restored; a stopped/fatal service needs operator repair.
+  // Surface degradation to Task Scheduler without restarting an intentionally stopped bot.
+  return ['error', 'degraded'].includes(report.status) ? 1 : 0;
 }
 
 module.exports = {call, validateDump, recover, record, main};
