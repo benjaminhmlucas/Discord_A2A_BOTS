@@ -5,9 +5,16 @@ const home = process.env.PM2_HOME;
 const args = process.argv.slice(2);
 fs.mkdirSync(home, { recursive: true });
 const log = path.join(home, 'fixture_commands.json');
-const records = fs.existsSync(log) ? JSON.parse(fs.readFileSync(log)) : [];
-records.push(args);
-fs.writeFileSync(log, JSON.stringify(records));
+const descriptor = fs.openSync(log, fs.constants.O_CREAT | fs.constants.O_RDWR);
+try {
+  const content = fs.readFileSync(descriptor, 'utf8');
+  const records = content ? JSON.parse(content) : [];
+  records.push(args);
+  fs.ftruncateSync(descriptor, 0);
+  fs.writeSync(descriptor, JSON.stringify(records), 0);
+} finally {
+  fs.closeSync(descriptor);
+}
 if (args[0] === 'install') {
   const directory = path.join(home, 'modules', 'pm2-logrotate', 'node_modules', 'pm2-logrotate');
   fs.mkdirSync(directory, { recursive: true });

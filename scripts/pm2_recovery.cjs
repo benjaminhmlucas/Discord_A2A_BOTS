@@ -74,9 +74,19 @@ function record(root, report) {
   fs.renameSync(temporary, destination);
   // Bounded local journal, independent of the possibly dead aggregate manager.
   const log = path.join(home, 'recovery.log');
-  if (fs.existsSync(log) && fs.statSync(log).size > 64000)
-    fs.renameSync(log, log + '.1');
-  fs.appendFileSync(log, JSON.stringify(report) + '\n');
+  // Inspect and update the same open file even if its pathname changes concurrently.
+  const descriptor = fs.openSync(log, fs.constants.O_CREAT | fs.constants.O_RDWR);
+  try {
+    let size = fs.fstatSync(descriptor).size;
+    if (size > 64000) {
+      fs.writeFileSync(log + '.1', fs.readFileSync(descriptor));
+      fs.ftruncateSync(descriptor, 0);
+      size = 0;
+    }
+    fs.writeSync(descriptor, JSON.stringify(report) + '\n', size);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 async function main(root, pm2, apps) {

@@ -105,6 +105,28 @@ test('callback/list/restore failures recorded and clients disconnected', async (
   } finally {f.cleanup();}
 });
 
+test('journal keeps its open file identity during a concurrent pathname replacement', () => {
+  const f = fixture();
+  const stat = fs.fstatSync;
+  const log = path.join(f.root, '.pm2/recovery.log');
+  const held = log + '.held';
+  fs.writeFileSync(log, 'old entry\n');
+  try {
+    fs.fstatSync = descriptor => {
+      const result = stat(descriptor);
+      fs.renameSync(log, held);
+      fs.writeFileSync(log, 'SYNTHETIC-UNRELATED');
+      return result;
+    };
+    recovery.record(f.root, {status:'ok'});
+    assert.equal(fs.readFileSync(log, 'utf8'), 'SYNTHETIC-UNRELATED');
+    assert.match(fs.readFileSync(held, 'utf8'), /"status":"ok"/);
+  } finally {
+    fs.fstatSync = stat;
+    f.cleanup();
+  }
+});
+
 test('rejects stale restart policy and validates PM2 string arguments', () => {
   const f = fixture();
   try {

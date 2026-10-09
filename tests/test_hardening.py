@@ -113,6 +113,25 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.c.privacy.filter(secret), "[private]")
 
 
+def test_privacy_directory_scan_error_retains_cached_rules(tmp_path):
+    path = tmp_path / "rules.md"
+    path.write_text("<!--PRIVATE:START-->SYNTHETIC-SECRET<!--PRIVATE:END-->")
+    privacy = Privacy(tmp_path)
+    assert privacy.filter("SYNTHETIC-SECRET") == "[private]"
+    prior = privacy.secrets.copy()
+
+    def fail_walk(root, **options):
+        assert root == tmp_path and options["followlinks"] is False
+        options["onerror"](PermissionError("synthetic directory denial"))
+
+    with patch("bridge_privacy.os.walk", side_effect=fail_walk):
+        for instance in (Privacy(tmp_path), privacy):
+            with pytest.raises(PermissionError, match="directory denial"):
+                instance.filter("SYNTHETIC-SECRET")
+    assert privacy.secrets == prior
+    assert privacy.filter("SYNTHETIC-SECRET") == "[private]"
+
+
 def test_privacy_reparse_and_unreadable_file_keep_previous_rules(tmp_path):
     path = tmp_path / "rules.md"
     path.write_text("<!--PRIVATE:START-->SYNTHETIC-SECRET<!--PRIVATE:END-->")
