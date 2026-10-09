@@ -30,7 +30,10 @@ environment and both locked PM2/logrotate graphs, failing on any known advisory.
 PM2's namespace adapter patches the internal `God.getMonitorData` method for
 metadata-only recovery queries. Every PM2 upgrade must revalidate that internal
 contract using actual daemon-loss and lifecycle tests, including normal monitoring.
-The managed CLI explicitly sets `BOTBRIDGE_PM2_METADATA_ONLY=1` so process-name
+The managed CLI recognizes leading global flags and their values before selecting
+the command; an option value named `stop` cannot change a `list` command. Unknown
+options preserve normal behavior and arguments are forwarded unchanged.
+Management operations explicitly set `BOTBRIDGE_PM2_METADATA_ONLY=1` so process-name
 lookup and operation summaries use metadata instead of blocking Windows WMI metrics.
 This requires the pinned Client.executeRemote adapter too. Direct PM2 monitoring
 without this opt-in retains normal CPU/memory collection.
@@ -42,17 +45,24 @@ The unit suite asserts lock equality and the shared override policy. Auditing kn
 exact coverage do not establish absence of unknown vulnerabilities.
 
 Privacy scanning propagates unreadable directory/file errors, rejects links and
-Windows reparse points, and reads every Markdown file on each refresh. Previous
-rules are retained until a complete scan succeeds; a failure blocks submission or
-publication. The privacy directory remains trusted, operator-managed storage. This
+Windows reparse points, and reads every Markdown file on each refresh. Each filter
+batch uses a complete immutable snapshot; a failed scan cannot fall back to stale
+rules or publish partially loaded rules. The privacy directory remains trusted, operator-managed storage. This
 literal filter is not semantic DLP and cannot prevent a model paraphrasing private
 information. Keep private information out of public context.
 
 Runtime scans run in worker threads. The request and public context share one complete
 input snapshot; public replies receive a fresh scan so rules or ACL changes during
 provider execution still apply. Concurrent batches never use partially loaded rules.
-Quota reservations precede acknowledgements and private-DM setup; failed admitted
-requests consume budget, preventing repeated failing requests from bypassing limits.
+Quota reservations precede acknowledgements and private-DM setup. Admission attempts
+count against the per-minute limits, even when they later time out in the queue.
+Daily capacity is reserved atomically while waiting, and spent only when the provider
+starts. Queue timeouts, cancellation or other failures before that point release the
+daily reservation without refunding the admission rate. Once the provider starts,
+failures and timeouts remain charged because provider work may already have occurred.
+Unused reservations expire after the configured total deadline plus 25 seconds of
+cleanup grace, so a crash cannot strand daily capacity for a full day. Expired
+reservations cannot start a provider or claim capacity already reassigned elsewhere.
 
 Tool-enabled `/work` requires the numeric owner, CodexBot, explicit enablement and
 successful private-DM setup. Only the owner's request text is included; channel
@@ -61,8 +71,10 @@ results remain private. Local work still has the owner's configured tool access;
 it is not an isolation boundary for a compromised owner account.
 
 Request counts persist in SQLite, using atomic transactions. Defaults allow six
-human requests per minute across identities, 30 provider calls per bot per minute
+human admission attempts per minute across identities, 30 admissions per bot per minute
 and 200 per bot in a rolling day. Discussion continuations count toward bot limits.
+When upgrading an existing database, historical admission records are conservatively
+imported once as spent daily usage; they age out normally rather than resetting limits.
 Failed provider attempts consume their reservation. Limits apply before invoking
 providers, and do not measure tokens or currency; configure provider-side spend
 limits where supported. Changing limits requires restarting the consumer.

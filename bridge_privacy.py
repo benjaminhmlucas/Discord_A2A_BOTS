@@ -11,7 +11,6 @@ TAG = re.compile(r"<!--\s*PRIVATE:(?:START|END)\s*-->", re.I)
 class Privacy:
     def __init__(self, memory_dir):
         self.memory_dir = Path(memory_dir)
-        self.secrets = []
 
     def refresh(self):
         # Unreadable or malformed privacy data must prevent public submission.
@@ -52,7 +51,6 @@ class Privacy:
                     values.append(secret)
                     values.extend(line.strip() for line in secret.splitlines() if line.strip())
         secrets = sorted(set(values), key=len, reverse=True)
-        self.secrets = secrets
         return tuple(secrets)
 
     def filter(self, text):

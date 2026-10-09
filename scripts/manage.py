@@ -11,6 +11,54 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# PM2 7.0.1 global options, used only to select the metadata optimization.
+# Unknown options fall back to normal PM2 behavior; argv is always forwarded intact.
+PM2_SWITCHES = set(
+    """
+-v --version -s --silent -m --mini-list --time --disable-logs -a --update-env
+-f --force --shutdown-with-message -x --execute-command --wait-ip -w --write
+--no-daemon --source-map-support --disable-source-map-support --wait-ready
+--merge-logs --no-color --no-vizion --no-autostart --no-autorestart --no-treekill
+--no-pmx --no-automation --trace --disable-trace --attach --v8
+--event-loop-inspector --deep-monitoring -h --help
+""".split()
+)
+PM2_VALUE_OPTIONS = set(
+    """
+--ext -n --name --interpreter --interpreter-args --node-args -o --output -e --error
+-l --log --filter-env --log-type --log-date-format --env -i --instances --parallel
+-p --pid -k --kill-timeout --listen-timeout --max-memory-restart --restart-delay
+--exp-backoff-restart-delay --max-restarts -u --user --uid --gid --namespace --cwd
+--hp --service-name -c --cron --cron-restart --only --watch --ignore-watch
+--watch-delay --stop-exit-codes --sort
+""".split()
+)
+
+
+def pm2_command(arguments):
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            return arguments[index + 1] if index + 1 < len(arguments) else None
+        if not argument.startswith("-"):
+            return argument
+        option, separator, _ = argument.partition("=")
+        if option in PM2_SWITCHES:
+            index += 1
+        elif option in PM2_VALUE_OPTIONS:
+            optional_without_value = option in {
+                "--log",
+                "-l",
+                "--filter-env",
+                "--max-restarts",
+                "--watch",
+            } and (index + 1 == len(arguments) or arguments[index + 1].startswith("-"))
+            index += 1 if separator or optional_without_value else 2
+        else:
+            return None
+    return None
+
 
 def stop_command(proc):
     """Stop only this command's live process tree; never address a daemon by name."""
@@ -85,8 +133,7 @@ def manage(action, root=ROOT, pm2_args=()):
     # Management needs identities/status, not potentially blocking Windows WMI metrics.
     # Explicit opt-in also covers module clients; normal operator monitoring is unchanged.
     if action == "start" or (
-        pm2_args
-        and pm2_args[0]
+        pm2_command(pm2_args)
         in (
             "start",
             "restart",

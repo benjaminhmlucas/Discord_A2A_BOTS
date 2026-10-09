@@ -25,7 +25,20 @@ class State:
               token TEXT, busy INTEGER, expires REAL, status TEXT);
             CREATE TABLE IF NOT EXISTS request_budget(bot INTEGER, author INTEGER, at REAL);
             CREATE INDEX IF NOT EXISTS request_budget_time ON request_budget(at);
+            CREATE TABLE IF NOT EXISTS provider_budget(id TEXT PRIMARY KEY, bot INTEGER,
+              at REAL, expires REAL, started INTEGER);
+            CREATE INDEX IF NOT EXISTS provider_budget_bot ON provider_budget(bot);
+            CREATE TABLE IF NOT EXISTS quota_migrations(name TEXT PRIMARY KEY);
             """)
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "INSERT OR IGNORE INTO quota_migrations VALUES ('provider-budget-v1')"
+            ).rowcount:
+                # Legacy attempts cannot be distinguished from actual calls. Import
+                # them once as spent quota, preserving limits across an upgrade.
+                db.execute(
+                    "INSERT INTO provider_budget SELECT 'legacy:' || rowid, bot, at, at+86400, 1 FROM request_budget"
+                )
 
     @contextmanager
     def connect(self):
@@ -52,25 +65,54 @@ class State:
             )
 
     def reserve_request(self, bot, author):
-        """Content-free rolling limits persist across restarts and serialize consumers."""
+        """Count admission rate and reserve daily capacity atomically before queueing."""
         now = time.time()
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM request_budget WHERE at < ?", (now - 86400,))
-            minute, day = db.execute(
-                "SELECT sum(at > ?), count(*) FROM request_budget WHERE bot=?", (now - 60, bot)
-            ).fetchone()
+            db.execute(
+                "DELETE FROM provider_budget WHERE (started=1 AND at<=?) OR (started=0 AND expires<=?)",
+                (now - 86400, now),
+            )
+            minute = db.execute(
+                "SELECT count(*) FROM request_budget WHERE bot=? AND at>?", (bot, now - 60)
+            ).fetchone()[0]
+            day = db.execute("SELECT count(*) FROM provider_budget WHERE bot=?", (bot,)).fetchone()[
+                0
+            ]
             user = db.execute(
                 "SELECT count(*) FROM request_budget WHERE author=? AND at > ?", (author, now - 60)
             ).fetchone()[0]
             if (
-                (minute or 0) >= self.config["bot_requests_per_minute"]
+                minute >= self.config["bot_requests_per_minute"]
                 or day >= self.config["bot_requests_per_day"]
                 or (author is not None and user >= self.config["user_requests_per_minute"])
             ):
-                return False
+                return None
             db.execute("INSERT INTO request_budget VALUES (?,?,?)", (bot, author, now))
-            return True
+            reservation = secrets.token_hex(16)
+            db.execute(
+                "INSERT INTO provider_budget VALUES (?,?,?,?,0)",
+                (reservation, bot, now, now + self.config.get("total_request_seconds", 180) + 25),
+            )
+            return reservation
+
+    def start_request(self, reservation):
+        """Spend only when entering the provider, never revive an expired reservation."""
+        now = time.time()
+        with self.connect() as db:
+            return (
+                db.execute(
+                    "UPDATE provider_budget SET started=1, at=? WHERE id=? AND started=0 AND expires>?",
+                    (now, reservation, now),
+                ).rowcount
+                == 1
+            )
+
+    def release_request(self, reservation):
+        """Unused capacity is refundable; started provider attempts remain charged."""
+        with self.connect() as db:
+            db.execute("DELETE FROM provider_budget WHERE id=? AND started=0", (reservation,))
 
     def start(self, message, bot, turns):
         sid = secrets.token_hex(16)

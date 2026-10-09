@@ -163,7 +163,24 @@ def test_start_complete_order_no_shell_and_no_automatic_save(tmp_path, absolute)
 
 
 @pytest.mark.parametrize(
-    "arguments,expected", [([], "0"), (["list"], "0"), (["restart", "synthetic"], "1")]
+    "arguments,expected",
+    [
+        ([], "0"),
+        (["list"], "0"),
+        (["restart", "synthetic"], "1"),
+        (["--silent", "stop", "synthetic"], "1"),
+        (["-s", "--no-color", "save"], "1"),
+        (["--silent", "list"], "0"),
+        (["--namespace", "stop", "list"], "0"),
+        (["--namespace=stop", "restart", "synthetic"], "1"),
+        (["--watch", "--name", "stop", "list"], "0"),
+        (["--watch", "path", "restart", "synthetic"], "1"),
+        (["--watch"], "0"),
+        (["--name"], "0"),
+        (["--unknown", "stop"], "0"),
+        (["--", "stop", "synthetic"], "1"),
+        (["--"], "0"),
+    ],
 )
 def test_manage_metadata_mode_is_limited_to_operations(tmp_path, arguments, expected):
     installation(tmp_path)
@@ -174,6 +191,7 @@ def test_manage_metadata_mode_is_limited_to_operations(tmp_path, arguments, expe
     ):
         manage.manage("pm2", tmp_path, arguments)
     assert run.call_args.args[2]["BOTBRIDGE_PM2_METADATA_ONLY"] == expected
+    assert run.call_args.args[0][-len(arguments) :] == arguments if arguments else True
 
 
 def test_start_requires_python_node_and_pm2(tmp_path):

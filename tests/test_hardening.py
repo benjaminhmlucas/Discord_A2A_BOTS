@@ -1,6 +1,8 @@
 """Regression tests for trust boundaries, persistent quotas and Windows I/O failures."""
 
+import asyncio
 import json
+import sqlite3
 import threading
 import os
 import subprocess
@@ -103,6 +105,88 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
         await bridge.handle(fixtures.Message(1, f"<@{fixtures.C}> HIDDEN VALUE", self.channel))
         self.assertNotIn("HIDDEN VALUE", self.calls[0][0])
 
+    async def test_queue_timeout_refunds_daily_capacity_but_keeps_admission_rate(self):
+        self.c.config.update(
+            bot_requests_per_day=1,
+            bot_requests_per_minute=2,
+            user_requests_per_minute=2,
+            queue_wait_seconds=0.002,
+        )
+        await self.c.lock.acquire()
+        try:
+            await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> waiting", self.channel))
+        finally:
+            self.c.lock.release()
+        self.assertIn("timed out", self.channel.sent[-1][0].content)
+        self.assertEqual(self.calls, [])
+        with self.c.state.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM provider_budget").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT count(*) FROM request_budget").fetchone()[0], 1)
+        await self.c.handle(fixtures.Message(2, f"<@{fixtures.C}> next", self.channel))
+        self.assertEqual(len(self.calls), 1)
+        await self.c.handle(fixtures.Message(3, f"<@{fixtures.C}> limited", self.channel))
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("request limit", self.channel.sent[-1][0].content)
+
+    async def test_failed_provider_attempt_stays_charged_and_restart_preserves_it(self):
+        self.c.config["bot_requests_per_day"] = 1
+        calls = []
+
+        async def fail(prompt, work=False):
+            calls.append(prompt)
+            raise RuntimeError("synthetic provider failure")
+
+        self.c.provider = fail
+        await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> failing", self.channel))
+        self.c.state = State(self.root / "runtime_state/discussions.sqlite3", self.c.config)
+        await self.c.handle(fixtures.Message(2, f"<@{fixtures.C}> limited", self.channel))
+        self.assertEqual(len(calls), 1)
+        with self.c.state.connect() as db:
+            self.assertEqual(db.execute("SELECT started FROM provider_budget").fetchone()[0], 1)
+
+    async def test_cancelled_queued_request_releases_daily_capacity(self):
+        queued = asyncio.Event()
+        send = self.channel.send
+
+        async def capture(text, **kwargs):
+            result = await send(text, **kwargs)
+            if "Bridge: queued" in text:
+                queued.set()
+            return result
+
+        self.channel.send = capture
+        await self.c.lock.acquire()
+        task = asyncio.create_task(
+            self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> waiting", self.channel))
+        )
+        try:
+            await asyncio.wait_for(queued.wait(), 2)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        finally:
+            self.c.lock.release()
+        self.assertEqual(self.c.pending, 0)
+        with self.c.state.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM provider_budget").fetchone()[0], 0)
+
+    async def test_expired_reservation_never_invokes_provider(self):
+        with patch.object(self.c.state, "start_request", return_value=False):
+            await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> expired", self.channel))
+        self.assertEqual(self.calls, [])
+        self.assertIn("timed out", self.channel.sent[-1][0].content)
+
+    async def test_quota_cleanup_failure_does_not_leak_queue_lock(self):
+        with patch.object(
+            self.c.state,
+            "release_request",
+            side_effect=sqlite3.OperationalError("synthetic DB failure"),
+        ):
+            with self.assertRaises(sqlite3.OperationalError):
+                await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> request", self.channel))
+        self.assertFalse(self.c.lock.locked())
+        self.assertEqual(self.c.pending, 0)
+
     @unittest.skipUnless(os.name == "nt", "Actual Windows ACL semantics")
     async def test_privacy_denied_subtree_fails_closed_for_fresh_and_cached_filters(self):
         blocked = self.memory / "blocked"
@@ -110,7 +194,6 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
         secret = "SYNTHETIC-NESTED-SECRET"
         (blocked / "private.md").write_text("<!--PRIVATE:START-->" + secret + "<!--PRIVATE:END-->")
         self.assertEqual(self.c.privacy.filter(secret), "[private]")
-        prior = self.c.privacy.secrets.copy()
         icacls = Path(os.environ["SYSTEMROOT"]) / "System32/icacls.exe"
         user = os.environ["USERDOMAIN"] + "\\" + os.environ["USERNAME"]
 
@@ -130,7 +213,6 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
             for privacy in (Privacy(self.memory), self.c.privacy):
                 with self.assertRaises(PermissionError):
                     privacy.filter(secret)
-            self.assertEqual(self.c.privacy.secrets, prior)
             await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> " + secret, self.channel))
             self.assertEqual(self.calls, [])
             self.assertIn("request failed", self.channel.sent[-1][0].content)
@@ -140,12 +222,11 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.c.privacy.filter(secret), "[private]")
 
 
-def test_privacy_directory_scan_error_retains_cached_rules(tmp_path):
+def test_privacy_directory_scan_error_blocks_fresh_and_previously_used_filters(tmp_path):
     path = tmp_path / "rules.md"
     path.write_text("<!--PRIVATE:START-->SYNTHETIC-SECRET<!--PRIVATE:END-->")
     privacy = Privacy(tmp_path)
     assert privacy.filter("SYNTHETIC-SECRET") == "[private]"
-    prior = privacy.secrets.copy()
 
     def fail_walk(root, **options):
         assert root == tmp_path and options["followlinks"] is False
@@ -155,16 +236,14 @@ def test_privacy_directory_scan_error_retains_cached_rules(tmp_path):
         for instance in (Privacy(tmp_path), privacy):
             with pytest.raises(PermissionError, match="directory denial"):
                 instance.filter("SYNTHETIC-SECRET")
-    assert privacy.secrets == prior
     assert privacy.filter("SYNTHETIC-SECRET") == "[private]"
 
 
-def test_privacy_reparse_and_unreadable_file_keep_previous_rules(tmp_path):
+def test_privacy_reparse_and_unreadable_file_block_refresh_until_repaired(tmp_path):
     path = tmp_path / "rules.md"
     path.write_text("<!--PRIVATE:START-->SYNTHETIC-SECRET<!--PRIVATE:END-->")
     privacy = Privacy(tmp_path)
     privacy.refresh()
-    prior = privacy.secrets.copy()
     with patch.object(
         Path, "lstat", return_value=SimpleNamespace(st_mode=0, st_file_attributes=0x400)
     ):
@@ -173,7 +252,6 @@ def test_privacy_reparse_and_unreadable_file_keep_previous_rules(tmp_path):
     with patch.object(Path, "read_text", side_effect=PermissionError("synthetic ACL")):
         with pytest.raises(PermissionError):
             privacy.refresh()
-    assert privacy.secrets == prior
     assert privacy.filter("synthetic-secret") == "[private]"
 
 
@@ -222,7 +300,65 @@ def test_persistent_atomic_quota_user_minute_bot_minute_and_day(tmp_path):
     config.update(user_requests_per_minute=20, bot_requests_per_minute=4, bot_requests_per_day=4)
     other = State(tmp_path / "concurrent.sqlite3", config)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        assert sum(pool.map(lambda _: other.reserve_request(101, None), range(16))) == 4
+        assert sum(pool.map(lambda _: bool(other.reserve_request(101, None)), range(16))) == 4
+
+
+def test_daily_reservation_refund_expiry_spending_and_concurrent_capacity(tmp_path):
+    config = {
+        "user_requests_per_minute": 20,
+        "bot_requests_per_minute": 20,
+        "bot_requests_per_day": 1,
+        "total_request_seconds": 10,
+    }
+    state = State(tmp_path / "budget.sqlite3", config)
+    with patch("bridge_state.time.time", return_value=100000):
+        reservation = state.reserve_request(101, 201)
+        assert reservation
+        assert not state.reserve_request(101, None)  # Pending capacity cannot be oversold.
+        state.release_request(reservation)
+        replacement = state.reserve_request(101, 201)
+        assert replacement
+    with patch("bridge_state.time.time", return_value=100036):
+        assert not state.start_request(replacement)
+        replacement = state.reserve_request(101, 201)  # Orphaned pending reservation expires.
+        assert state.start_request(replacement)
+        assert not state.start_request(replacement)
+        state.release_request(replacement)
+        assert not state.reserve_request(101, None)  # Spent usage cannot be refunded.
+        reloaded = State(tmp_path / "budget.sqlite3", config)
+        assert not reloaded.reserve_request(101, None)
+    with patch("bridge_state.time.time", return_value=186437):
+        assert state.reserve_request(101, None)
+    config["bot_requests_per_day"] = 3
+    concurrent = State(tmp_path / "concurrent-day.sqlite3", config)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        reservations = list(pool.map(lambda _: concurrent.reserve_request(101, None), range(12)))
+    assert sum(bool(value) for value in reservations) == 3
+    for reservation in filter(None, reservations):
+        concurrent.release_request(reservation)
+    assert concurrent.reserve_request(101, None)
+
+
+def test_legacy_quota_migration_is_atomic_and_does_not_reimport_new_admissions(tmp_path):
+    path = tmp_path / "legacy.sqlite3"
+    config = {
+        "user_requests_per_minute": 20,
+        "bot_requests_per_minute": 20,
+        "bot_requests_per_day": 2,
+    }
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE request_budget(bot INTEGER, author INTEGER, at REAL)")
+        db.execute("INSERT INTO request_budget VALUES (101,201,100000)")
+    with patch("bridge_state.time.time", return_value=100061):
+        state = State(path, config)
+        pending = state.reserve_request(101, 201)
+        assert pending
+        state.release_request(pending)
+        reloaded = State(path, config)
+        with reloaded.connect() as db:
+            assert db.execute("SELECT count(*) FROM provider_budget").fetchone()[0] == 1
+        assert reloaded.reserve_request(101, 201)
+        assert not reloaded.reserve_request(101, 201)
 
 
 @pytest.mark.parametrize(

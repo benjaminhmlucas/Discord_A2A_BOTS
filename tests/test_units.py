@@ -144,7 +144,7 @@ def test_privacy_empty_sources_symlinks_empty_markers_and_bad_input(tmp_path):
     file = tmp_path / "fixture.md"
     file.write_text("<!--PRIVATE:START-->   <!--PRIVATE:END-->")
     p.refresh()
-    assert p.secrets == []
+    assert p.refresh() == ()
     assert p.filter("harmless") == "harmless"
     with pytest.raises(RuntimeError, match="Malformed private text"):
         p.filter("<!--PRIVATE:END-->")

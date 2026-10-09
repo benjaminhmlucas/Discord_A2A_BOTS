@@ -308,10 +308,12 @@ class Bridge:
             return
         self.pending += 1
         acquired, destination = False, message.channel
+        reservation = None
         try:
-            if not self.state.reserve_request(
+            reservation = self.state.reserve_request(
                 self.bot_id, None if message.author.bot else message.author.id
-            ):
+            )
+            if reservation is None:
                 if session:
                     self.state.fail(session[0])
                 await self.send(
@@ -389,7 +391,13 @@ class Bridge:
                 provider_budget = min(
                     self.config["request_seconds"], max(0.001, deadline - time.monotonic())
                 )
-                reply = await asyncio.wait_for(self.provider(prompt, work=work), provider_budget)
+
+                async def invoke_provider():
+                    if not self.state.start_request(reservation):
+                        raise asyncio.TimeoutError("Provider reservation expired")
+                    return await self.provider(prompt, work=work)
+
+                reply = await asyncio.wait_for(invoke_provider(), provider_budget)
             if not isinstance(reply, str) or not reply.strip():
                 raise RuntimeError("Provider returned no text")
             decision = "continue"
@@ -464,13 +472,17 @@ class Bridge:
             except Exception as send_error:
                 self.log(f"Failure notice could not be sent: {type(send_error).__name__}")
         finally:
-            if acquired:
-                self.lock.release()
-            self.pending -= 1
-            self.health["active_message_id"] = (
-                None if acquired else self.health["active_message_id"]
-            )
-            self.write_health()
+            try:
+                if reservation is not None:
+                    self.state.release_request(reservation)
+            finally:
+                if acquired:
+                    self.lock.release()
+                self.pending -= 1
+                self.health["active_message_id"] = (
+                    None if acquired else self.health["active_message_id"]
+                )
+                self.write_health()
 
 
 async def dispatch(bridge, message):
