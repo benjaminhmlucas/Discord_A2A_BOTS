@@ -72,6 +72,7 @@ def stop_command(proc):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -93,7 +94,10 @@ def run(command, root, env, timeout=120):
         cwd=root,
         env=env,
         start_new_session=os.name != "nt",
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        creationflags=(
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        ),
     )
     try:
         code = proc.wait(timeout=timeout)

@@ -97,6 +97,8 @@ The ecosystem contains all three launchers; a disabled identity exits with code 
 
 Supervised Windows services use the venv's `pythonw.exe` to run without console windows. PM2 still captures stdout and stderr in its log files. Use `python.exe` for setup, diagnostics, and tests that need console output; do not replace all Python invocations with `pythonw.exe`.
 
+Provider subprocesses, management helpers, timeout cleanup and PM2 module installers also suppress new console windows. Native Windows tests check that these helper launch paths allocate no console or visible application window.
+
 8. Register independent Windows recovery after saving and verifying the roster:
 
 ```powershell
@@ -130,7 +132,7 @@ Public chat providers cannot browse GitHub or retrieve links. Supply the relevan
 & .\.venv\Scripts\python.exe -m coverage json
 & .\.venv\Scripts\python.exe -m coverage report
 & .\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
-node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=ecosystem.config.js --test-coverage-include=scripts/pm2_namespace.cjs --test-coverage-include=scripts/pm2_recovery.cjs --test-coverage-include=scripts/recover_pm2.cjs tests/test_ecosystem.cjs tests/test_pm2_namespace.cjs tests/test_pm2_recovery.cjs
+node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=ecosystem.config.js --test-coverage-include=scripts/pm2_namespace.cjs --test-coverage-include=scripts/pm2_recovery.cjs --test-coverage-include=scripts/recover_pm2.cjs --test-coverage-include=scripts/hidden_windows.cjs tests/test_ecosystem.cjs tests/test_pm2_namespace.cjs tests/test_pm2_recovery.cjs tests/test_hidden_windows.cjs
 ```
 
 Both unit tests and setup integration tests are required. Coverage must be exactly 100% of statements and branch outcomes in every shipped Python module, with no coverage exclusions. JavaScript production configuration must also pass 100% line, branch and function coverage. See [testing procedures](docs/TESTING.md) for the native Windows installation, PowerShell, process-protection and 1 GB log-budget checks.

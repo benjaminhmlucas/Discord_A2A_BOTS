@@ -37,6 +37,10 @@ def test_setup_subprocesses_receive_scoped_paths_and_stop_on_failures(tmp_path):
             assert call.kwargs["cwd"] == tmp_path.resolve()
             assert call.kwargs["env"]["PM2_HOME"] == str(tmp_path.resolve() / ".pm2")
             assert call.kwargs["start_new_session"] == (os.name != "nt")
+            assert call.kwargs["creationflags"] == (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
             assert not call.kwargs.get("shell", False)
 
 
@@ -112,6 +116,9 @@ def test_manage_cleanup_targets_only_the_owned_live_command(mode):
         elif platform == "nt":
             assert kill.call_args.args[0][-4:] == ["/PID", "42", "/T", "/F"]
             assert kill.call_args.kwargs["timeout"] == 10
+            assert kill.call_args.kwargs["creationflags"] == getattr(
+                subprocess, "CREATE_NO_WINDOW", 0
+            )
         else:
             operating.killpg.assert_called_once_with(42, manage.signal.SIGKILL)
         assert proc.kill.call_count == (

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -61,7 +62,9 @@ def child_env():
         "SSL_CERT_DIR",
         "NODE_EXTRA_CA_CERTS",
     }
-    return {k: v for k, v in os.environ.items() if k.upper() in allow}
+    env = {k: v for k, v in os.environ.items() if k.upper() in allow}
+    env["NODE_OPTIONS"] = "--require=" + json.dumps(str(ROOT / "scripts/hidden_windows.cjs"))
+    return env
 
 
 async def kill_tree(proc):
@@ -76,6 +79,7 @@ async def kill_tree(proc):
             "/F",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         await asyncio.wait_for(killer.wait(), 10)
     else:
@@ -147,6 +151,7 @@ async def codex(prompt, work=False):
             stderr=asyncio.subprocess.DEVNULL,
             cwd=MEMORY if work else runtime,
             env=child_env(),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), 225)
         if proc.returncode:
@@ -244,6 +249,7 @@ async def claude(prompt, work=False):
         stderr=asyncio.subprocess.DEVNULL,
         cwd=ROOT / "chat_runtime",
         env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), 120)

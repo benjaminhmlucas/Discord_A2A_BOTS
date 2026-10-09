@@ -30,10 +30,10 @@ Module._load = function (request, parent, isMain) {
         fs.copyFileSync(path.join(locked, 'package-lock.json'), path.join(expected, 'package-lock.json'));
         return value.spawn(process.execPath,
           [npm, 'ci', '--ignore-scripts', '--prefix', expected, '--loglevel=error'],
-          { ...options, shell: false });
+          { ...options, shell: false, windowsHide: true });
       }
-      if (command !== 'npm.cmd') return value.spawn(command, args, options);
-      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false });
+      if (command !== 'npm.cmd') return value.spawn(command, args, { ...options, windowsHide: true });
+      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false, windowsHide: true });
     } };
   }
   const file = Module._resolveFilename(request, parent, isMain);

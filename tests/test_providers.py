@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,7 +43,11 @@ def test_child_environment_boundary():
             }
         ),
     ):
-        assert providers.child_env() == {"PATH": "fixture", "temp": "fixture"}
+        env = providers.child_env()
+        assert env.pop("NODE_OPTIONS") == "--require=" + json.dumps(
+            str(providers.ROOT / "scripts/hidden_windows.cjs")
+        )
+        assert env == {"PATH": "fixture", "temp": "fixture"}
 
 
 @pytest.mark.parametrize("value", ["", " \t\n", 7, None])
@@ -72,6 +77,10 @@ def test_kill_tree(platform, done):
         asyncio.run(providers.kill_tree(proc))
         assert proc.wait.await_count == (0 if done else 1)
         assert spawn.await_count == (1 if platform == "nt" and not done else 0)
+        if spawn.await_count:
+            assert spawn.call_args.kwargs["creationflags"] == getattr(
+                subprocess, "CREATE_NO_WINDOW", 0
+            )
         assert proc.kill.call_count == (1 if platform == "posix" and not done else 0)
 
 
@@ -128,6 +137,7 @@ def test_codex_cli_contract_and_cleanup(tmp_path, work, model, outcome):
         assert ("features.shell_tool=false" in args) == (not work)
         assert ("-m" in args) == bool(model)
         assert kwargs["stdin"] == asyncio.subprocess.PIPE
+        assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
         assert kwargs["cwd"] == (str(tmp_path) if work else tmp_path / "chat_runtime")
         assert kill.await_count == (1 if outcome == "timeout" else 0)
         assert not Path(args[args.index("-o") + 1]).exists()
@@ -276,5 +286,6 @@ def test_claude_contract_and_cleanup(mode):
             assert args[args.index("--tools") + 1] == ""
             assert "--strict-mcp-config" in args and "--no-session-persistence" in args
             assert kwargs["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "synthetic-oauth"
+            assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
             proc.communicate.assert_awaited_once_with(b"first\nsecond")
         assert kill.await_count == (1 if mode == "timeout" else 0)

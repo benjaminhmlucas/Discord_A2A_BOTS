@@ -106,8 +106,10 @@ test('only PM2 module npm installation bypasses the shell', () => {
     assert.equal(path.basename(calls[0][1][0]), 'npm-cli.js');
     assert.equal(calls[0][1].at(-1), 'synthetic space & path');
     assert.equal(calls[0][2].shell, false);
+    assert.equal(calls[0][2].windowsHide, true);
     scoped.spawn('bun', ['install'], { shell: false });
     assert.equal(calls[1][0], 'bun');
+    assert.equal(calls[1][2].windowsHide, true);
     assert.equal(Module._load('child_process', null, false), child);
     const savedHome = process.env.PM2_HOME;
     process.env.PM2_HOME = root;
@@ -129,6 +131,7 @@ test('only PM2 module npm installation bypasses the shell', () => {
         assert.ok(calls.at(-1)[1].includes('--ignore-scripts'));
         assert.equal(calls.at(-1)[0],process.execPath);
         assert.equal(calls.at(-1)[2].shell,false);
+        assert.equal(calls.at(-1)[2].windowsHide,true);
       }
       delete process.env.PM2_HOME;
       assert.throws(()=>scoped.spawn('npm.cmd',['install','pm2-logrotate@3.0.0'],{}),/scoped PM2_HOME/);
