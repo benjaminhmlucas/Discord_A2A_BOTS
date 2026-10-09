@@ -33,6 +33,8 @@ def test_actual_scheduled_recovery_and_preserved_stop(tmp_path):
     env.update(
         PM2_HOME=str(root / ".pm2"),
         NODE_OPTIONS="--require=" + json.dumps(str(scripts / "pm2_namespace.cjs")),
+        # Match managed PM2 commands: identity lookup must not wait on WMI metrics.
+        BOTBRIDGE_PM2_METADATA_ONLY="1",
     )
     env["PATH"] = str(Path(native.NODE).parent) + os.pathsep + env.get("PATH", "")
 
