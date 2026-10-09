@@ -17,7 +17,9 @@ function fixture() {
   save();
   let rows = [{name: 'synthetic', pid: 42, pm2_env: {status: 'online'}}];
   const counts = {restore: 0, disconnect: 0, connect: 0};
-  const pm2 = {Client: {pingDaemon: cb => cb(true)},
+  const pm2 = {Client: {pingDaemon: cb => cb(true), executeRemote: (method, options, cb) => {
+    assert.equal(method, 'getMonitorData'); assert.deepEqual(options, {botbridge_metadata_only: true}); pm2.list(cb);
+  }},
     connect: cb => {counts.connect++; cb(null);},
     list: cb => cb(null, rows),
     resurrect: cb => {counts.restore++; rows = [{name: 'synthetic', pid: 43, pm2_env: {status: 'online'}}]; cb(null);},

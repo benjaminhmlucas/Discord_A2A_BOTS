@@ -94,7 +94,9 @@ const pm2=require('./tools/pm2/node_modules/pm2');
 const action=process.argv[2];
 const trace=stage=>require('node:fs').appendFileSync('control-diagnostics.log',new Date().toISOString()+' '+stage+' '+action+'\n');
 trace('connecting');
-const timer=setTimeout(()=>{trace('timed out');process.exit(2);},30000);
+// Windows process-tree queries can delay stop callbacks past 30 seconds.
+// Match the shipped recovery CLI's hard deadline; still fail rather than hang.
+const timer=setTimeout(()=>{trace('timed out');process.exit(2);},45000);
 pm2.connect(error=>{
  trace('connected');
  if(error)process.exit(1);
@@ -102,7 +104,7 @@ pm2.connect(error=>{
  if(action==='start')pm2.start('./ecosystem.config.js',done);
  else if(action==='stop')pm2.stop('synthetic-recovery',done);
  else if(action==='save')pm2.dump(done);
- else if(action==='list')pm2.list(done);
+ else if(action==='list')pm2.Client.executeRemote('getMonitorData',{botbridge_metadata_only:true},done);
  else pm2.killDaemon(done);
 });
 """)

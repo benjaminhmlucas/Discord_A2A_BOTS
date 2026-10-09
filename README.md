@@ -89,7 +89,7 @@ Run `scripts/start.ps1`. Startup invokes Node directly with the configured local
 
 Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.1 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
 
-The preloader rejects other PM2 versions and pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
+The preloader rejects other PM2 versions and installs logrotate from its committed integrity lock using npm ci with lifecycle scripts disabled. This also pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
 
 PM2 7.0.1 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
 
@@ -139,9 +139,10 @@ Default tests use fake Discord destinations and AI consumers, alongside real Win
 
 ## CI and merge policy
 
-Changes require an independently approved pull request, fresh approval after code
-changes, resolved review conversations and all required checks on an up-to-date
-branch. Main blocks force pushes and deletion, with no bypass list. CI pins action
+Enable a main-branch ruleset requiring an independently approved pull request,
+fresh approval after code changes, resolved review conversations and all required
+checks on an up-to-date branch. Block force pushes and deletion with no bypass
+list. Verify these repository settings; workflow files alone do not enforce them. CI pins action
 commits and runs formatting/lint, strict boundary type checks, Bandit, Python/npm
 audits, CodeQL, both supported OS suites and exact coverage gates. Dependabot proposes
 weekly dependency/action updates. See [the security review policy](docs/security-review.md)

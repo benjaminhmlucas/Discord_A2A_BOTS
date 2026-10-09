@@ -47,12 +47,13 @@ async function recover(root, apps, pm2) {
   if (!alive) validateDump(root, apps);
   await call(done => pm2.connect(done));
   try {
-    let rows = await call(done => pm2.list(done));
+    const list = done => pm2.Client.executeRemote('getMonitorData', {botbridge_metadata_only: true}, done);
+    let rows = await call(list);
     const missing = apps.some(app => !rows.some(row => row.name === app.name));
     if (missing) {
       validateDump(root, apps);
       await call(done => pm2.resurrect(done));
-      rows = await call(done => pm2.list(done));
+      rows = await call(list);
     }
     const healthy = apps.every(app => rows.some(row => row.name === app.name && row.pm2_env.status === 'online'));
     return {status: healthy ? 'ok' : 'degraded', recovered: missing,

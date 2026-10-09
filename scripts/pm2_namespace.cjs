@@ -25,12 +25,11 @@ Module._load = function (request, parent, isMain) {
         const expected = path.resolve(process.env.PM2_HOME, 'modules', 'pm2-logrotate');
         if (index < 0 || typeof prefix !== 'string' || path.resolve(prefix) !== expected)
           throw new Error('Refusing an unexpected logrotate installation directory');
-        const policy = require('../dependencies/pm2/package.json');
-        fs.writeFileSync(path.join(expected, 'package.json'), JSON.stringify({
-          private: true, dependencies: { 'pm2-logrotate': '3.0.0' }, overrides: policy.overrides
-        }));
+        const locked = path.resolve(__dirname, '../dependencies/logrotate');
+        fs.copyFileSync(path.join(locked, 'package.json'), path.join(expected, 'package.json'));
+        fs.copyFileSync(path.join(locked, 'package-lock.json'), path.join(expected, 'package-lock.json'));
         return value.spawn(process.execPath,
-          [npm, 'install', 'pm2-logrotate@3.0.0', '--prefix', expected, '--loglevel=error'],
+          [npm, 'ci', '--ignore-scripts', '--prefix', expected, '--loglevel=error'],
           { ...options, shell: false });
       }
       if (command !== 'npm.cmd') return value.spawn(command, args, options);
@@ -38,6 +37,20 @@ Module._load = function (request, parent, isMain) {
     } };
   }
   const file = Module._resolveFilename(request, parent, isMain);
+  if (path.basename(file) === 'ActionMethods.js' && path.basename(path.dirname(file)) === 'God' &&
+      path.basename(path.resolve(path.dirname(file), '../..')) === 'pm2') {
+    validate(path.resolve(path.dirname(file), '../..'));
+    // Recovery needs service identity/status, not WMI CPU/memory measurements.
+    // Keep normal monitoring unchanged; only an explicit RPC flag takes this path.
+    return function (God) {
+      value(God);
+      const monitor = God.getMonitorData;
+      God.getMonitorData = function (env, callback) {
+        if (env?.botbridge_metadata_only === true) return callback(null, God.getFormatedProcesses());
+        return monitor(env, callback);
+      };
+    };
+  }
   if (path.basename(file) !== 'paths.js' || path.basename(path.dirname(file)) !== 'pm2') return value;
   validate(path.dirname(file));
   if (typeof value !== 'function') throw new Error('Unsupported PM2 paths module');

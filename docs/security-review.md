@@ -1,6 +1,6 @@
 # Security controls and review policy
 
-The default branch requires a pull request, one independent approval of the latest
+Configure the default branch to require a pull request, one independent approval of the latest
 push, dismissal of stale approvals, resolved conversations, an up-to-date branch,
 and passing required checks. There is no bypass list. Deletion and force pushes are
 blocked. Linear history requires squash or rebase merging. An author cannot approve
@@ -29,8 +29,9 @@ environment and both locked PM2/logrotate graphs, failing on any known advisory.
 
 PM2's namespace adapter intentionally requires PM2 7.0.1. A dependency update that
 changes this version must update and retest the adapter and both npm manifests
-together. The logrotate audit manifest uses the same overrides as the production
-installer; the unit suite asserts that agreement. Auditing known advisories and
+together. The production logrotate installer copies the committed manifest and integrity
+lock and runs npm ci with lifecycle scripts disabled; CI audits that same graph.
+The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 
 Privacy scanning propagates unreadable directory/file errors, rejects links and
@@ -58,3 +59,8 @@ policy, ordered arguments and interpreter before resurrection. It preserves stop
 or fatal services. Degradation returns exit code 1 and writes a bounded journal;
 operators must inspect fresh recovery/health state and repair the cause. It does not
 restart stopped services merely to make monitoring green.
+
+Recovery's metadata-only process-list RPC avoids Windows CPU/memory query delays.
+The adapter enables it only for an explicit boolean flag in pinned PM2 7.0.1;
+normal monitoring continues to collect metrics. The actual scheduled-task test
+verifies cold recovery, deliberately stopped service preservation and cleanup.

@@ -5,6 +5,31 @@ const os = require('node:os');
 const path = require('node:path');
 require('../scripts/pm2_namespace.cjs');
 
+test('recovery metadata RPC skips WMI while normal metrics and unrelated modules are preserved', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'metadata-rpc-'));
+  try {
+    for (const directory of ['pm2/lib/God', 'unrelated/lib/God', 'pm2/lib/Other']) {
+      fs.mkdirSync(path.join(root, directory), {recursive: true});
+      const packageRoot = path.resolve(root, directory, '../..');
+      fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({name: 'pm2', version: '7.0.1'}));
+      const entry = path.join(root, directory, 'ActionMethods.js');
+      fs.writeFileSync(entry, 'module.exports = God => {God.getMonitorData = (env, cb) => {God.metricCalls++; cb(null, "metrics");};};');
+      const rows = [{name: 'synthetic', pid: 42, pm2_env: {status: 'online'}}];
+      const God = {metricCalls: 0, getFormatedProcesses: () => rows};
+      require(entry)(God);
+      God.getMonitorData({botbridge_metadata_only: true}, (error, value) => {
+        assert.equal(error, null);
+        assert.equal(value, directory === 'pm2/lib/God' ? rows : 'metrics');
+      });
+      const expected = directory === 'pm2/lib/God' ? 0 : 1;
+      assert.equal(God.metricCalls, expected);
+      for (const env of [{}, null, {botbridge_metadata_only: 'true'}])
+        God.getMonitorData(env, (error, value) => {assert.equal(error, null); assert.equal(value, 'metrics');});
+      assert.equal(God.metricCalls, expected + 3);
+    }
+  } finally {fs.rmSync(root, {recursive: true, force: true});}
+});
+
 test('PM2 paths are distinct per home, including nested PM2 module copies', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'namespace-check-'));
   try {
@@ -67,6 +92,9 @@ test('only PM2 module npm installation bypasses the shell', () => {
         const policy=JSON.parse(fs.readFileSync(path.join(destination,'package.json')));
         assert.equal(policy.dependencies['pm2-logrotate'],'3.0.0');
         assert.equal(policy.overrides.pm2,'7.0.1');
+        assert.deepEqual(JSON.parse(fs.readFileSync(path.join(destination,'package-lock.json'))), require('../dependencies/logrotate/package-lock.json'));
+        assert.equal(calls.at(-1)[1][1],'ci');
+        assert.ok(calls.at(-1)[1].includes('--ignore-scripts'));
         assert.equal(calls.at(-1)[0],process.execPath);
         assert.equal(calls.at(-1)[2].shell,false);
       }
