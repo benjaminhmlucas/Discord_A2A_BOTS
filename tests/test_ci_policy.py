@@ -13,6 +13,22 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def test_required_workflows_verify_prs_and_main_without_duplicate_feature_pushes():
+    for name in ("ci.yml", "codeql.yml"):
+        workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+        # PyYAML's YAML 1.1 resolver treats the GitHub key "on" as True.
+        triggers = workflow.get("on", workflow.get(True))
+        assert triggers["push"] == {"branches": ["main"]}
+        assert triggers["pull_request"] == {"branches": ["main"]}
+        assert set(triggers) == (
+            {"push", "pull_request", "schedule"}
+            if name == "codeql.yml"
+            else {"push", "pull_request"}
+        )
+        if name == "codeql.yml":
+            assert triggers["schedule"] == [{"cron": "23 8 * * 1"}]
+
+
 def test_workflows_pin_actions_and_avoid_privileged_pr_execution():
     for path in (ROOT / ".github/workflows").glob("*.yml"):
         workflow = yaml.safe_load(path.read_text())
