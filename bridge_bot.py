@@ -9,6 +9,7 @@ from botbridge_logging import append_line
 from bridge_providers import Gemini, claude, codex, secret
 from bridge_runtime import Bridge, ROOT, dispatch, load_config
 from bridge_windows import protect_process
+from bridge_health_io import write_health
 from botbridge_common import CODEX_APP_ID, ANTIGRAVITY_APP_ID, CLAUDE_BOT_APP_ID
 
 TOKENS = {
@@ -66,6 +67,4 @@ def main(bot_id):
         bridge.health["ready"] = False
         bridge.health["timestamp"] = 0
         path = ROOT / "runtime_state" / f"health_{bot_id}.json"
-        from bridge_health_io import write_health
-
         write_health(path, bridge.health)

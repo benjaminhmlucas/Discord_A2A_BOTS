@@ -71,7 +71,17 @@ function record(root, report) {
   const destination = path.join(home, 'recovery_state.json');
   const temporary = destination + '.tmp';
   fs.writeFileSync(temporary, JSON.stringify(report, null, 2));
-  fs.renameSync(temporary, destination);
+  let attempt = 0;
+  while (true) {
+    try {
+      fs.renameSync(temporary, destination);
+      break;
+    } catch (error) {
+      attempt++;
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt === 3) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
   // Bounded local journal, independent of the possibly dead aggregate manager.
   const log = path.join(home, 'recovery.log');
   // Inspect and update the same open file even if its pathname changes concurrently.

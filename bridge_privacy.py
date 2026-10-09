@@ -11,10 +11,9 @@ TAG = re.compile(r"<!--\s*PRIVATE:(?:START|END)\s*-->", re.I)
 class Privacy:
     def __init__(self, memory_dir):
         self.memory_dir = Path(memory_dir)
-        self.signature = None
         self.secrets = []
 
-    def refresh(self) -> None:
+    def refresh(self):
         # Unreadable or malformed privacy data must prevent public submission.
         paths = []
 
@@ -39,7 +38,6 @@ class Privacy:
         paths.sort()
         if not paths:
             raise RuntimeError("Privacy source unavailable")
-        signature = [(str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths]
         # Always re-read: ACL changes do not change file size/mtime. Publish the new
         # secret set only after every source has been read and validated successfully.
         values = []
@@ -53,15 +51,23 @@ class Privacy:
                 if secret:
                     values.append(secret)
                     values.extend(line.strip() for line in secret.splitlines() if line.strip())
-        self.secrets = sorted(set(values), key=len, reverse=True)
-        self.signature = signature
+        secrets = sorted(set(values), key=len, reverse=True)
+        self.secrets = secrets
+        return tuple(secrets)
 
     def filter(self, text):
-        self.refresh()
+        return self.filter_many(text)[0]
+
+    def filter_many(self, *texts):
+        """Read once for a batch, then use one complete snapshot for all inputs."""
+        secrets = self.refresh()
+        return tuple(self._filter(text, secrets) for text in texts)
+
+    def _filter(self, text, secrets):
         text = BLOCK.sub("[private]", text)
         if TAG.search(text):
             raise RuntimeError("Malformed private text")
-        for value in self.secrets:
+        for value in secrets:
             # Spaces/newlines and case variation should not bypass literal DLP.
             pattern = r"\s+".join(re.escape(part) for part in value.split())
             text = re.sub(pattern, "[private]", text, flags=re.I)

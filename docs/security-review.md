@@ -27,7 +27,10 @@ syntax; tree termination addresses owned PIDs. Review these findings when proces
 code changes. Dependency audits cover the installed Python development/runtime
 environment and both locked PM2/logrotate graphs, failing on any known advisory.
 
-PM2's namespace adapter intentionally requires PM2 7.0.1. A dependency update that
+PM2's namespace adapter patches the internal `God.getMonitorData` method for
+metadata-only recovery queries. Every PM2 upgrade must revalidate that internal
+contract using actual daemon-loss and lifecycle tests, including normal monitoring.
+The adapter intentionally requires PM2 7.0.1. A dependency update that
 changes this version must update and retest the adapter and both npm manifests
 together. The production logrotate installer copies the committed manifest and integrity
 lock and runs npm ci with lifecycle scripts disabled; CI audits that same graph.
@@ -40,6 +43,12 @@ rules are retained until a complete scan succeeds; a failure blocks submission o
 publication. The privacy directory remains trusted, operator-managed storage. This
 literal filter is not semantic DLP and cannot prevent a model paraphrasing private
 information. Keep private information out of public context.
+
+Runtime scans run in worker threads. The request and public context share one complete
+input snapshot; public replies receive a fresh scan so rules or ACL changes during
+provider execution still apply. Concurrent batches never use partially loaded rules.
+Quota reservations precede acknowledgements and private-DM setup; failed admitted
+requests consume budget, preventing repeated failing requests from bypassing limits.
 
 Tool-enabled `/work` requires the numeric owner, CodexBot, explicit enablement and
 successful private-DM setup. Only the owner's request text is included; channel

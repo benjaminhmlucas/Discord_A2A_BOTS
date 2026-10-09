@@ -9,6 +9,7 @@ from pathlib import Path
 from botbridge_logging import append_line
 from bridge_runtime import load_config
 from bridge_windows import protect_process
+from bridge_health_io import write_health
 
 ROOT = Path(__file__).resolve().parent
 
@@ -97,8 +98,6 @@ def main():
                 "failures": [type(exc).__name__],
             }
         path = ROOT / "runtime_state" / "setup_health.json"
-        from bridge_health_io import write_health
-
         write_health(path, report)
         signature = (report["status"], tuple(report["failures"]))
         if signature != previous:

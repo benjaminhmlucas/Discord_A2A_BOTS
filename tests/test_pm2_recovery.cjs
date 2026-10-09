@@ -127,6 +127,34 @@ test('journal keeps its open file identity during a concurrent pathname replacem
   }
 });
 
+test('state replacement retries sharing conflicts and preserves the old snapshot on exhaustion', () => {
+  const f = fixture();
+  const rename = fs.renameSync;
+  const destination = path.join(f.root, '.pm2/recovery_state.json');
+  try {
+    for (const code of ['EPERM', 'EACCES', 'EBUSY']) {
+      let attempts = 0;
+      fs.renameSync = (...args) => {
+        if (++attempts < 3) throw Object.assign(new Error('sharing conflict'), {code});
+        return rename(...args);
+      };
+      recovery.record(f.root, {status: 'ok'});
+      assert.equal(attempts, 3);
+      assert.equal(JSON.parse(fs.readFileSync(destination)).status, 'ok');
+    }
+    for (const code of ['EPERM', 'ENOENT']) {
+      let attempts = 0;
+      fs.renameSync = () => { attempts++; throw Object.assign(new Error('cannot replace'), {code}); };
+      assert.throws(() => recovery.record(f.root, {status:'new'}), /cannot replace/);
+      assert.equal(attempts, code === 'EPERM' ? 3 : 1);
+      assert.equal(JSON.parse(fs.readFileSync(destination)).status, 'ok');
+    }
+  } finally {
+    fs.renameSync = rename;
+    f.cleanup();
+  }
+});
+
 test('rejects stale restart policy and validates PM2 string arguments', () => {
   const f = fixture();
   try {

@@ -9,8 +9,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: codeql-${{ github.ref }}
-  cancel-in-progress: true
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   analyze:
     name: CodeQL (${{ matrix.language }})
@@ -41,18 +41,49 @@ jobs:
           SARIF_DIRECTORY: '${{ runner.temp }}/codeql-results'
         run: |
           python - <<'PY'
-          import json, os
+          import json, math, os
           from pathlib import Path
           reports = list(Path(os.environ['SARIF_DIRECTORY']).glob('*.sarif'))
           if not reports:
               raise SystemExit('CodeQL produced no SARIF report')
           blocked = 0
+          unresolved = 0
           for report in reports:
               for run in json.loads(report.read_text())['runs']:
-                  rules = {r['id']: r for r in run['tool']['driver']['rules']}
+                  tool = run['tool']
+                  components = [tool['driver'], *tool.get('extensions', [])]
                   for result in run.get('results', []):
-                      severity = float(rules[result['ruleId']].get('properties', {}).get('security-severity', '0'))
+                      reference = result.get('rule', {})
+                      component_ref = reference.get('toolComponent', {})
+                      rule_id = reference.get('id', result.get('ruleId'))
+                      index = reference.get('index', result.get('ruleIndex'))
+                      try:
+                          if 'index' in component_ref:
+                              component_index = component_ref['index']
+                              if type(component_index) is not int or component_index < 0:
+                                  raise ValueError('Invalid extension index')
+                              candidates = [tool.get('extensions', [])[component_index]]
+                          elif component_ref:
+                              candidates = [c for c in components if all(c.get(k) == v for k, v in component_ref.items())]
+                          else:
+                              candidates = components if index is None else [tool['driver']]
+                          if index is not None:
+                              if type(index) is not int or index < 0 or len(candidates) != 1:
+                                  raise ValueError('Invalid rule index')
+                              rules = [candidates[0].get('rules', [])[index]]
+                          else:
+                              rules = [r for c in candidates for r in c.get('rules', []) if rule_id is not None and r.get('id') == rule_id]
+                          if len(rules) != 1 or (rule_id is not None and rules[0].get('id') != rule_id):
+                              raise ValueError('Unknown, ambiguous or inconsistent rule reference')
+                          severity = float(rules[0].get('properties', {}).get('security-severity', '0'))
+                          if not math.isfinite(severity) or not 0 <= severity <= 10:
+                              raise ValueError('Invalid security severity')
+                      except (IndexError, ValueError, TypeError) as error:
+                          print(f'Unresolved CodeQL rule {rule_id!r}: {error}')
+                          unresolved += 1
+                          continue
                       blocked += result.get('level') == 'error' or severity >= 4
           print(f'Blocking CodeQL findings: {blocked}')
-          raise SystemExit(bool(blocked))
+          print(f'Unresolved CodeQL findings: {unresolved}')
+          raise SystemExit(bool(blocked or unresolved))
           PY

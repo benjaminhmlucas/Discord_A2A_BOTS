@@ -148,7 +148,6 @@ def test_privacy_empty_sources_symlinks_empty_markers_and_bad_input(tmp_path):
     assert p.filter("harmless") == "harmless"
     with pytest.raises(RuntimeError, match="Malformed private text"):
         p.filter("<!--PRIVATE:END-->")
-    p.signature = None
     with patch.object(Path, "is_symlink", return_value=True):
         with pytest.raises(RuntimeError, match="symlink"):
             p.refresh()

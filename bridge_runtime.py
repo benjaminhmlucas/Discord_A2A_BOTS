@@ -309,6 +309,17 @@ class Bridge:
         self.pending += 1
         acquired, destination = False, message.channel
         try:
+            if not self.state.reserve_request(
+                self.bot_id, None if message.author.bot else message.author.id
+            ):
+                if session:
+                    self.state.fail(session[0])
+                await self.send(
+                    message.channel,
+                    "Bridge: request limit reached; wait before trying again.",
+                    message,
+                )
+                return
             if work:
                 # Resolve private destination before invoking tools; no public fallback for results.
                 destination = await asyncio.wait_for(
@@ -341,8 +352,9 @@ class Bridge:
                 if work
                 else (self.root / self.config["public_context_file"]).read_text(encoding="utf-8")
             )
-            context = self.privacy.filter(context)
-            public_context = self.privacy.filter(public_context)
+            context, public_context = await asyncio.to_thread(
+                self.privacy.filter_many, context, public_context
+            )
             await self.send(
                 message.channel,
                 "Bridge: queued; replies will reference your original message.",
@@ -350,15 +362,6 @@ class Bridge:
             )
             await asyncio.wait_for(self.lock.acquire(), self.config["queue_wait_seconds"])
             acquired = True
-            if not self.state.reserve_request(
-                self.bot_id, None if message.author.bot else message.author.id
-            ):
-                if session:
-                    self.state.fail(session[0])
-                await self.send(
-                    destination, "Bridge: request limit reached; wait before trying again."
-                )
-                return
             self.health["active_message_id"] = message.id
             self.write_health()
             prompt = (
@@ -394,7 +397,7 @@ class Bridge:
                 reply, decision = discussion_reply(reply)
             reply = STRIP.sub("", reply).strip()
             if not work:
-                reply = self.privacy.filter(reply)
+                reply = await asyncio.to_thread(self.privacy.filter, reply)
             reply = reply[:16000]
             next_bot, suffix = None, ""
             if session:

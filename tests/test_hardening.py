@@ -1,6 +1,7 @@
 """Regression tests for trust boundaries, persistent quotas and Windows I/O failures."""
 
 import json
+import threading
 import os
 import subprocess
 import unittest
@@ -50,15 +51,41 @@ class Hardening(unittest.IsolatedAsyncioTestCase):
     async def test_quota_blocks_provider_and_discussion_handoff(self):
         self.c.config["bot_requests_per_day"] = 1
         await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> first", self.channel))
+        before = len(self.channel.sent)
         await self.c.handle(fixtures.Message(2, f"<@{fixtures.C}> /discuss 3 second", self.channel))
         self.assertEqual(len(self.calls), 1)
         self.assertIn("request limit", self.channel.sent[-1][0].content)
+        self.assertEqual(len(self.channel.sent), before + 1)
+        self.assertEqual(self.channel.sent[-1][1]["reference"].message_id, 2)
         self.assertEqual(self.c.pending, 0)
         self.assertFalse(self.c.lock.locked())
         with self.c.state.connect() as db:
             self.assertEqual(db.execute("SELECT status FROM discussions").fetchone()[0], "failed")
         await self.c.handle(fixtures.Message(3, f"<@{fixtures.C}> /work third", self.channel))
         self.assertEqual(len(self.calls), 1)
+
+    async def test_privacy_scans_run_off_event_loop_and_refresh_new_rules_before_reply(self):
+        main_thread = threading.get_ident()
+        threads = []
+        refresh = self.c.privacy.refresh
+
+        def checked_refresh():
+            threads.append(threading.get_ident())
+            return refresh()
+
+        async def reply(prompt, work=False):
+            self.assertNotIn("HIDDEN VALUE", prompt)
+            (self.memory / "late.md").write_text(
+                "<!--PRIVATE:START-->LATE-PRIVATE-VALUE<!--PRIVATE:END-->"
+            )
+            return "LATE-PRIVATE-VALUE"
+
+        self.c.provider = reply
+        with patch.object(self.c.privacy, "refresh", side_effect=checked_refresh):
+            await self.c.handle(fixtures.Message(1, f"<@{fixtures.C}> HIDDEN VALUE", self.channel))
+        self.assertEqual(len(threads), 2)  # One input batch, then fresh output rules.
+        self.assertTrue(all(identity != main_thread for identity in threads))
+        self.assertEqual(self.channel.sent[-1][0].content, "[private]")
 
     async def test_injected_services_reuse_the_same_policy_and_state(self):
         bridge = Bridge(
