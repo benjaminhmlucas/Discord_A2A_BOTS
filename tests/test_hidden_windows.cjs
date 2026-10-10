@@ -34,18 +34,29 @@ test('all child-process overloads preserve arguments, callbacks and options in b
           check(['fixture'],['fixture',[],bare]);
         } else if (['exec','execSync'].includes(method)) {
           check(['fixture',options,callback],['fixture',applied,callback]);
-          check(['fixture',callback],['fixture',bare,callback]);
+          if (method === 'exec') check(['fixture',callback],['fixture',bare,callback]);
+          else assert.throws(()=>child[method]('fixture',callback),TypeError);
           check(['fixture'],['fixture',bare,undefined]);
         } else {
           for (const args of [undefined,null,[],['--fixture']]) {
             check(['fixture',args,options,callback],['fixture',args ?? [],applied,callback]);
-            check(['fixture',args,callback],['fixture',args ?? [],bare,callback]);
+            if (method === 'execFile') check(['fixture',args,callback],['fixture',args ?? [],bare,callback]);
+            else assert.throws(()=>child[method]('fixture',args,callback),TypeError);
           }
-          check(['fixture',callback],['fixture',[],bare,callback]);
+          if (method === 'execFile') check(['fixture',callback],['fixture',[],bare,callback]);
+          else assert.throws(()=>child[method]('fixture',callback),TypeError);
           check(['fixture',options,callback],['fixture',[],applied,callback]);
           check(['fixture'],['fixture',[],bare,undefined]);
         }
         assert.equal(options.windowsHide,false);
+        for (const invalid of [true,7,'invalid',[]])
+          assert.throws(()=>['exec','execSync'].includes(method)
+            ? child[method]('fixture',invalid) : child[method]('fixture',[],invalid),TypeError);
+        if (['spawn','spawnSync','fork'].includes(method)) {
+          check(['fixture',null,null],['fixture',[],bare]);
+        } else if (['exec','execSync'].includes(method)) {
+          check(['fixture',null],['fixture',bare,undefined]);
+        } else check(['fixture',null,null],['fixture',[],bare,undefined]);
       }
       for (const method of ['exec','execFile']) {
         for (const failed of [false,true]) {
