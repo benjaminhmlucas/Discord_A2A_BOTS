@@ -39,6 +39,7 @@ if '-o' in sys.argv:
 elif '--probe-json' in sys.argv:
     with open(sys.argv[sys.argv.index('--probe-json') + 1], 'w') as file:
         file.write(payload)
+    print('WINDOW-PROBE-OUTPUT', flush=True)
 else:
     print(json.dumps({'result': payload, 'is_error': False}))
 """
@@ -68,32 +69,89 @@ def test_actual_helper_has_no_console_or_visible_window(tmp_path, mode):
             result = json.loads(asyncio.run(providers.claude("synthetic request")))
         else:
             output = tmp_path / "management.json"
-            manage.run([sys.executable, probe, "--probe-json", output], tmp_path, os.environ.copy())
+            code = "import os,sys; from pathlib import Path; from scripts.manage import run; run(sys.argv[2:],Path(sys.argv[1]),os.environ.copy())"
+            child = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    code,
+                    str(tmp_path),
+                    sys.executable,
+                    str(probe),
+                    "--probe-json",
+                    str(output),
+                ],
+                cwd=manage.ROOT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=20,
+            )
+            assert "WINDOW-PROBE-OUTPUT" in child.stdout
             result = json.loads(output.read_text())
     assert result == {"console": 0, "visible_windows": []}
 
 
-@pytest.mark.parametrize("method", ["spawn", "spawnSync"])
+@pytest.mark.parametrize(
+    "method", ["spawn", "spawnSync", "fork", "exec", "execSync", "execFile", "execFileSync"]
+)
 def test_provider_node_descendant_does_not_create_a_visible_console(tmp_path, method):
     node = os.environ.get("BOTBRIDGE_TEST_NODE") or shutil.which("node")
     assert node, "Native helper check requires Node"
     probe = tmp_path / "probe.py"
     probe.write_text(PROBE, encoding="utf-8")
     output = tmp_path / "descendant.json"
-    code = (
-        "const cp=require('node:child_process');"
-        f"const child=cp.{method}(process.argv[1],process.argv.slice(2),{{stdio:'inherit'}});"
-        + (
-            "child.on('exit',code=>process.exit(code));"
-            if method == "spawn"
-            else "process.exit(child.status);"
+    prefix = "const cp=require('node:child_process');"
+    if method in ("exec", "execSync"):
+        command = f'"{sys.executable}" "{probe}" --probe-json "{output}"'
+        invocation = f"cp.{method}({json.dumps(command)},{{}}"
+    else:
+        options = (
+            "{execPath:process.argv[1],execArgv:[],stdio:['ignore','pipe','pipe','ipc']}"
+            if method == "fork"
+            else "{stdio:'inherit'}"
+            if method.startswith("spawn")
+            else "{}"
         )
-    )
-    subprocess.run(
+        executable = "process.argv[2]" if method == "fork" else "process.argv[1]"
+        argv = "process.argv.slice(3)" if method == "fork" else "process.argv.slice(2)"
+        invocation = f"cp.{method}({executable},{argv},{options}"
+    if method in ("exec", "execFile"):
+        code = (
+            prefix
+            + invocation
+            + ", (err,out)=>{process.stdout.write(out);process.exit(err?1:0);});"
+        )
+    elif method in ("execSync", "execFileSync"):
+        code = prefix + "process.stdout.write(" + invocation + "));"
+    elif method == "fork":
+        code = (
+            prefix
+            + "const child="
+            + invocation
+            + ");child.stdout.pipe(process.stdout);child.on('exit',code=>process.exit(code));"
+        )
+    else:
+        code = (
+            prefix
+            + "const child="
+            + invocation
+            + ");"
+            + (
+                "child.on('exit',code=>process.exit(code));"
+                if method == "spawn"
+                else "process.exit(child.status);"
+            )
+        )
+    result = subprocess.run(
         [node, "-e", code, sys.executable, str(probe), "--probe-json", str(output)],
         env=providers.child_env(),
         creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True,
+        text=True,
         check=True,
         timeout=20,
     )
     assert json.loads(output.read_text()) == {"console": 0, "visible_windows": []}
+    assert "WINDOW-PROBE-OUTPUT" in result.stdout

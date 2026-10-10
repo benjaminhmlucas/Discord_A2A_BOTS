@@ -39,7 +39,7 @@ def test_setup_subprocesses_receive_scoped_paths_and_stop_on_failures(tmp_path):
             assert call.kwargs["start_new_session"] == (os.name != "nt")
             assert call.kwargs["creationflags"] == (
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                | manage.creation_flags(background=False, env=call.kwargs["env"])
             )
             assert not call.kwargs.get("shell", False)
 

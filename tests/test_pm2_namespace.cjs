@@ -133,6 +133,21 @@ test('only PM2 module npm installation bypasses the shell', () => {
         assert.equal(calls.at(-1)[2].shell,false);
         assert.equal(calls.at(-1)[2].windowsHide,true);
       }
+      const priorConsole = process.env.BOTBRIDGE_SHOW_CONSOLE;
+      try {
+        for (const show of ['0','1']) {
+          process.env.BOTBRIDGE_SHOW_CONSOLE = show;
+          for (const [command,args] of [ ['npm.cmd',['version']], ['bun',['version']],
+            ['npm.cmd',['install','pm2-logrotate@3.0.0','--prefix',destination]] ]) {
+            scoped.spawn(command,args,{stdio:'inherit'});
+            assert.equal(calls.at(-1)[2].windowsHide,show !== '1');
+            assert.equal(calls.at(-1)[2].stdio,'inherit');
+          }
+        }
+      } finally {
+        if (priorConsole === undefined) delete process.env.BOTBRIDGE_SHOW_CONSOLE;
+        else process.env.BOTBRIDGE_SHOW_CONSOLE = priorConsole;
+      }
       delete process.env.PM2_HOME;
       assert.throws(()=>scoped.spawn('npm.cmd',['install','pm2-logrotate@3.0.0'],{}),/scoped PM2_HOME/);
     } finally {

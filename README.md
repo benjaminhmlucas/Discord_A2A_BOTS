@@ -97,7 +97,21 @@ The ecosystem contains all three launchers; a disabled identity exits with code 
 
 Supervised Windows services use the venv's `pythonw.exe` to run without console windows. PM2 still captures stdout and stderr in its log files. Use `python.exe` for setup, diagnostics, and tests that need console output; do not replace all Python invocations with `pythonw.exe`.
 
-Provider subprocesses, management helpers, timeout cleanup and PM2 module installers also suppress new console windows. Native Windows tests check that these helper launch paths allocate no console or visible application window.
+Provider subprocesses, timeout cleanup and PM2 module installers suppress new console windows by default. Management helpers keep an attached terminal; when launched without a console, they suppress new windows. Output still reaches the inherited streams and PM2 log files.
+
+For troubleshooting, set the following in the PowerShell terminal used to run any setup, management or foreground bot script:
+
+```powershell
+$env:BOTBRIDGE_SHOW_CONSOLE = '1'
+& .\scripts\pm2.ps1 list
+& .\scripts\pm2.ps1 logs --lines 30 --nostream
+```
+
+Only the exact value `1` enables consoles. It applies to Python helpers, provider-local Node child processes, PM2 installers, and all five services when their ecosystem configuration is next loaded. In this mode services use `python.exe` and `windowsHide: false`; already-running services are not changed by setting the variable. Use a separate installation or stop the matching supervised service before running a bot in the foreground, to avoid duplicate Discord connections. PM2 still captures service output in logs, and provider output retains its existing privacy boundaries. This switch controls console creation, not logging verbosity.
+
+Return to the background default with `Remove-Item Env:BOTBRIDGE_SHOW_CONSOLE`. If you started services in troubleshooting mode, reload their normal ecosystem configuration before saving the production roster. Recovery validates the saved console policy against the current ecosystem; a hidden recovery task rejects a saved troubleshooting roster. Do not persist troubleshooting mode in the global user environment or scheduled recovery task.
+
+Native Windows tests check Python helpers and all seven Node launch APIs for hidden consoles and preserved output. The preload cannot control commands launched directly by native `codex.exe` during `/work`, or programs that explicitly allocate their own windows. `/work` remains disabled by default; test native tool-window behavior separately before enabling it.
 
 8. Register independent Windows recovery after saving and verifying the roster:
 

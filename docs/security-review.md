@@ -44,6 +44,18 @@ lock and runs npm ci with lifecycle scripts disabled; CI audits that same graph.
 The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 
+Provider child environments replace inherited `NODE_OPTIONS` with an absolute path to
+the checkout-owned `scripts/hidden_windows.cjs` preload. Node descendants inherit that
+path, including Node tools launched during `/work`; keep the checkout at its configured
+location. The preload wraps all seven child-process launch APIs and updates named ESM
+exports. It preserves arguments, callbacks, environment, working directory and stdio.
+It cannot intercept processes launched directly by native provider executables.
+`BOTBRIDGE_SHOW_CONSOLE=1` is an operator-only troubleshooting setting, propagated into
+provider children and the configured service roster. It changes console visibility,
+not permissions, credential filtering or provider output capture. Default recovery
+rejects a saved visible roster; restore and save the hidden ecosystem after debugging.
+Node's launch options are documented at https://nodejs.org/api/child_process.html.
+
 Privacy scanning propagates unreadable directory/file errors, rejects links and
 Windows reparse points, and reads every Markdown file on each refresh. Each filter
 batch uses a complete immutable snapshot; a failed scan cannot fall back to stale

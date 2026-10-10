@@ -16,6 +16,7 @@ Module._load = function (request, parent, isMain) {
     validate(path.resolve(path.dirname(parent.filename), '../../..'));
     // PM2's npm.cmd shell invocation loses quoting for spaces and ampersands.
     return { ...value, spawn(command, args, options) {
+      const windowsHide = process.env.BOTBRIDGE_SHOW_CONSOLE !== '1';
       const npm = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
       if (args.includes('pm2-logrotate@3.0.0')) {
         if (!process.env.PM2_HOME) throw new Error('A scoped PM2_HOME is required');
@@ -30,10 +31,10 @@ Module._load = function (request, parent, isMain) {
         fs.copyFileSync(path.join(locked, 'package-lock.json'), path.join(expected, 'package-lock.json'));
         return value.spawn(process.execPath,
           [npm, 'ci', '--ignore-scripts', '--prefix', expected, '--loglevel=error'],
-          { ...options, shell: false, windowsHide: true });
+          { ...options, shell: false, windowsHide });
       }
-      if (command !== 'npm.cmd') return value.spawn(command, args, { ...options, windowsHide: true });
-      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false, windowsHide: true });
+      if (command !== 'npm.cmd') return value.spawn(command, args, { ...options, windowsHide });
+      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false, windowsHide });
     } };
   }
   const file = Module._resolveFilename(request, parent, isMain);

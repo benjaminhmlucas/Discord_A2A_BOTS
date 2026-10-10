@@ -50,6 +50,16 @@ def test_child_environment_boundary():
         assert env == {"PATH": "fixture", "temp": "fixture"}
 
 
+def test_troubleshooting_flag_survives_credential_filter_without_inherited_preloads():
+    with patch.dict(
+        providers.os.environ, {"BOTBRIDGE_SHOW_CONSOLE": "1", "NODE_OPTIONS": "untrusted-preload"}
+    ):
+        env = providers.child_env()
+        assert env["BOTBRIDGE_SHOW_CONSOLE"] == "1"
+        assert "untrusted-preload" not in env["NODE_OPTIONS"]
+        assert providers.creation_flags() == 0
+
+
 @pytest.mark.parametrize("value", ["", " \t\n", 7, None])
 def test_blank_or_non_string_credentials_fail_closed(value):
     registry = MagicMock()

@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -12,6 +11,7 @@ import aiohttp
 from bridge_contracts import ProviderError
 from bridge_settings import ROOT, local_path, local_settings, config_path
 import shutil
+from scripts.console_windows import creation_flags
 
 _settings = local_settings()
 _node = Path(shutil.which(_settings["node_executable"]) or _settings["node_executable"])
@@ -61,6 +61,7 @@ def child_env():
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
         "NODE_EXTRA_CA_CERTS",
+        "BOTBRIDGE_SHOW_CONSOLE",
     }
     env = {k: v for k, v in os.environ.items() if k.upper() in allow}
     env["NODE_OPTIONS"] = "--require=" + json.dumps(str(ROOT / "scripts/hidden_windows.cjs"))
@@ -79,7 +80,7 @@ async def kill_tree(proc):
             "/F",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=creation_flags(),
         )
         await asyncio.wait_for(killer.wait(), 10)
     else:
@@ -151,7 +152,7 @@ async def codex(prompt, work=False):
             stderr=asyncio.subprocess.DEVNULL,
             cwd=MEMORY if work else runtime,
             env=child_env(),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=creation_flags(),
         )
         await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), 225)
         if proc.returncode:
@@ -249,7 +250,7 @@ async def claude(prompt, work=False):
         stderr=asyncio.subprocess.DEVNULL,
         cwd=ROOT / "chat_runtime",
         env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        creationflags=creation_flags(),
     )
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), 120)

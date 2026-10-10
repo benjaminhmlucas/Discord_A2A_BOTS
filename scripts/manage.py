@@ -1,6 +1,7 @@
 """Testable setup/start orchestration. Every command uses this checkout's paths."""
 
 import argparse
+import importlib
 import os
 import json
 import shutil
@@ -10,6 +11,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+creation_flags = importlib.import_module("scripts.console_windows").creation_flags
 
 # PM2 7.0.1 global options, used only to select the metadata optimization.
 # Unknown options fall back to normal PM2 behavior; argv is always forwarded intact.
@@ -72,7 +75,7 @@ def stop_command(proc):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=10,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                creationflags=creation_flags(),
             )
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -93,10 +96,12 @@ def run(command, root, env, timeout=120):
         command,
         cwd=root,
         env=env,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
         start_new_session=os.name != "nt",
         creationflags=(
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | creation_flags(background=False, env=env)
         ),
     )
     try:
