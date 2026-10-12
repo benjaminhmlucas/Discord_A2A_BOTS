@@ -77,16 +77,16 @@ prevent arbitrary behavior by candidate code within that runner's existing right
 
 ## Acceptance Criteria and evidence
 
-| AC | Code and verification |
+| AC (issue #16 wording) | Code and verification |
 | --- | --- |
-| Untrusted data cannot grant denied public capabilities or expose a literal synthetic private value | `bridge_authorization.py`, real `Bridge` dispatch/privacy, `test_untrusted_artifacts_cannot_change_actual_public_dispatch` |
-| PR metadata/diffs, forged identity/approval, tool results and cross-user access are covered | `tests/fixtures/prompt_injection.json`, `test_prompt_injection.py`, `test_ci_injection.py` |
-| Enforcement does not depend on recognizing malicious wording | Numeric metadata checks and exact work enablement; arbitrary provider text remains text |
-| PR workflow privilege and credential isolation is checked | `check_ci_policy.py`, real mutated YAML files and real checker CLI invocations in `test_ci_injection.py` |
-| Denials fail closed and legitimate operations still work | Public attack/benign requests, authorized private work, private delivery denial and durable replay tests |
-| Tests/coverage/security checks pass on the implementation head | Exact Python statement/branch gate and Node line/branch/function gate in required hosted CI; results belong in the implementation PR |
-| Deterministic guarantees and limitations are documented | This document and `SECURITY.md` |
-| Independent review and protected merges remain required | Existing repository rules; no rule or required-check-name changes |
+| Public dispatch and data-only workflow checks demonstrate that untrusted content cannot grant a denied capability, invoke a privileged work provider, access private context or publish a literal synthetic private value | `bridge_authorization.py`, real `Bridge` dispatch/privacy and `check_ci_policy.py`; `test_untrusted_artifacts_cannot_change_actual_public_dispatch` asserts no work-mode provider call, no private value in the prompt or output and unchanged private files |
+| Tests cover PR metadata/diffs/docs, forged owner identity/approval, tool/web results, cross-user access and durable replay attempts | `tests/fixtures/prompt_injection.json` (PR, document, Discord quote, web, MCP and tool sources), `test_prompt_injection.py` (forged/lookalike identity, cross-user `/work`, restart and refusal replay, bot handoffs), `test_ci_injection.py` |
+| Tests exercise authorization/tool boundaries rather than depending on a model recognizing particular malicious wording | Numeric transport metadata and exact work enablement decide capabilities; the test provider returns hostile text that is never interpreted |
+| The workflow checker rejects excessive privileges, production job contexts, unsafe checkout credentials and untrusted expressions; hosted PR tests use synthetic configuration without production secrets | `check_ci_policy.py` with real mutated YAML and real checker CLI runs in `test_ci_injection.py`, each asserting its exact rejection code; workflows use only `contents: read` (CodeQL adds `security-events: write`) and no secrets |
+| Negative cases fail closed while benign public requests and explicitly authorized private work retain expected behavior | Public attack/benign requests, authorized private work, private-delivery denial and replay tests in `test_prompt_injection.py`; a valid workflow passes the real checker CLI |
+| Required tests, exact 100% Python statement/branch and Node line/branch/function coverage, audits and CodeQL pass on the implementation head, with evidence in the linked PR | Required hosted CI: exact Python statement/branch gate, Node line/branch/function gate, audits and CodeQL; per-head results are in the PR description |
+| Documentation and PR description map the ACs to code/tests and distinguish deterministic boundary enforcement from best-effort detection, candidate-controlled CI and existing owner-work risks | This document (including Limits), `SECURITY.md` and the PR description |
+| Adversarial agent review has no outstanding actionable findings; existing independent GitHub approval and protected merge requirements remain enforced | Review outcome is recorded in the PR; repository rules and the five required check names are unchanged |
 
 The added integration tests execute real bridge authorization, SQLite state and
 privacy filtering against actual temporary files. Discord networking and model

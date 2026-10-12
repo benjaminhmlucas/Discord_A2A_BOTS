@@ -70,6 +70,7 @@ def save(root, data, name="ci.yml"):
         ("missing_checkout", "checkout_required"),
         ("missing_gate", "policy_gate_required"),
         ("pr_title_expression", "expression_in_execution"),
+        ("multiline_expression", "expression_in_execution"),
         ("pr_body_expression", "expression_in_execution"),
         ("pr_comment_expression", "expression_in_execution"),
         ("secrets_expression", "expression_in_execution"),
@@ -126,6 +127,9 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
     elif fault == "imposter_pin":
         # Approved family, well-formed but unreviewed commit (older or fork-network SHA).
         job["steps"][0]["uses"] = "actions/checkout@" + "f" * 40
+    elif fault == "multiline_expression":
+        # An expression split across lines inside a block scalar is still detected.
+        job["steps"].append({"run": "echo ${{\n  github.event.pull_request.title }}\n"})
     elif fault == "credentials":
         job["steps"][0]["with"]["persist-credentials"] = True
     elif fault == "credentials_omitted":
@@ -311,7 +315,7 @@ def test_native_yaml_object_command_never_runs(candidate, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
     assert gate.main() == 1
     assert not owned.exists()
-    assert "OWNED" not in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == "CI policy rejected: yaml_tag"
 
 
 @pytest.mark.parametrize(
