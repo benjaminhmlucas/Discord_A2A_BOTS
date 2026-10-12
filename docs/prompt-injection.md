@@ -16,7 +16,8 @@ handoff transaction and its single-use token.
 `authorize_work` grants the existing work mode only to an eligible human owner
 issuing an explicit `/work` command to CodexBot, with `allow_work` exactly `true`.
 Private-DM setup and an actual send must succeed before the work provider runs.
-SQLite records prevent a Discord message being executed again after a restart.
+SQLite records prevent a Discord message being executed again, including after a
+restart, within their retention window (24 hours, at most 20,000 records).
 There is no approval-token API: quoted or repeated approval text grants nothing.
 
 Public calls remain text-only: Codex disables tools, browsing and inherited
@@ -36,14 +37,18 @@ be loaded. A synthetic private value is redacted even if a provider emits it.
 `scripts/check_ci_policy.py` parses workflow files as YAML data. It never executes
 their `run` commands or candidate Python/JavaScript code. It rejects unexpected
 workflows/triggers/jobs, untrusted runners, excessive permissions, production job
-environments, unpinned actions, persistent checkout credentials, direct PR/secrets
-expressions, duplicate YAML keys, aliases and malformed configuration. Only the
-CodeQL analysis job may publish security events. Main runs must not cancel each
-other. The checker runs inside the existing required Quality and dependency audits
+environments, actions not pinned to the reviewed commits, persistent checkout
+credentials, direct PR/secrets expressions, duplicate YAML keys, aliases and
+malformed configuration. Only the CodeQL analysis job may publish security events.
+Main runs must not cancel each other: job keys are an allowlist, so job-level
+`concurrency`, `if`, `continue-on-error`, `env`, `uses` and similar settings are
+rejected. The checker runs inside the existing required Quality and dependency audits
 job, so the five required check names and independent approval rules are unchanged.
 
 Expressions are permitted by structural location, not a global keyword list.
-Only the action families and input fields used by these two workflows are allowed.
+Only the action families, exact commits and input fields used by these two
+workflows are allowed; an action update, including a Dependabot PR, must update
+`ACTION_PINS` in the checker in the same reviewed change.
 Executable shell/retargeting fields cannot consume display or PR expressions.
 The policy job and its single checker step must run unconditionally and block on
 failure; the checker cannot be retargeted through step/default directories. The

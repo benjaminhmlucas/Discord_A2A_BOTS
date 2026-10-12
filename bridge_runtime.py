@@ -265,6 +265,8 @@ class Bridge:
         try:
             work = authorize_work(text, message, self.bot_id, CODEX_APP_ID, self.config)
         except WorkDenied as denied:
+            if session:
+                self.state.fail(session[0])  # A handoff cannot leave its discussion busy.
             await self.send(message.channel, str(denied), message)
             return
         if start:

@@ -33,6 +33,17 @@ ACTION_INPUTS = {
         "output": ("runner.temp",),
     },
 }
+# Exact reviewed commits: an action update must change this trusted list deliberately.
+ACTION_PINS = {
+    "actions/checkout": "d23441a48e516b6c34aea4fa41551a30e30af803",
+    "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
+    "actions/setup-node": "249970729cb0ef3589644e2896645e5dc5ba9c38",
+    "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "github/codeql-action/init": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+    "github/codeql-action/analyze": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+}
+# Allowlist, not denylist: if/continue-on-error/concurrency/env/uses etc. are rejected.
+JOB_KEYS = {"name", "runs-on", "timeout-minutes", "permissions", "strategy", "steps"}
 
 
 class PolicyError(ValueError):
@@ -122,12 +133,7 @@ def validate_workflow(text, name):
     require(isinstance(jobs, dict) and set(jobs) == expected_jobs, "unexpected_ci_jobs")
     for identity, job in jobs.items():
         require(isinstance(job, dict), "job_mapping_required")
-        require(
-            not set(job)
-            & {"environment", "secrets", "uses", "env", "container", "services", "defaults"},
-            "privileged_job_context",
-        )
-        require("if" not in job and job.get("continue-on-error", False) is False, "job_execution")
+        require(set(job) <= JOB_KEYS, "unapproved_job_key")
         permissions = {"contents": "read"}
         if name == "codeql.yml":
             permissions["security-events"] = "write"
@@ -185,8 +191,9 @@ def validate_workflow(text, name):
                     and re.fullmatch(r"(?:actions|github)/[\w/-]+@[a-f0-9]{40}", action),
                     "unpinned_or_untrusted_action",
                 )
-                family = action.rsplit("@", 1)[0]
+                family, pin = action.rsplit("@", 1)
                 require(family in ACTION_INPUTS, "unapproved_action_family")
+                require(pin == ACTION_PINS[family], "unapproved_action_pin")
                 inputs = step.get("with", {})
                 require(isinstance(inputs, dict), "action_input_mapping")
                 require(set(inputs) <= set(ACTION_INPUTS[family]), "unapproved_action_input")

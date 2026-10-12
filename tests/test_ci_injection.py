@@ -33,42 +33,43 @@ def save(root, data, name="ci.yml"):
 
 
 @pytest.mark.parametrize(
-    "fault",
+    "fault,code",
     [
-        "trigger",
-        "branches",
-        "permissions",
-        "ambient_env",
-        "cancellation",
-        "job_set",
-        "job_type",
-        "environment",
-        "job_secrets",
-        "reusable",
-        "job_env",
-        "container",
-        "services",
-        "job_permission",
-        "runner",
-        "runner_matrix",
-        "steps_empty",
-        "steps_type",
-        "step_type",
-        "step_both",
-        "step_neither",
-        "action",
-        "action_type",
-        "credentials",
-        "missing_checkout",
-        "missing_gate",
-        "pr_title_expression",
-        "pr_body_expression",
-        "pr_comment_expression",
-        "secrets_expression",
-        "codeql_permission",
+        ("trigger", "untrusted_workflow_trigger"),
+        ("branches", "unbounded_branch_trigger"),
+        ("permissions", "workflow_permissions"),
+        ("ambient_env", "ambient_workflow_environment"),
+        ("cancellation", "main_run_cancellation"),
+        ("job_set", "unexpected_ci_jobs"),
+        ("job_type", "job_mapping_required"),
+        ("environment", "unapproved_job_key"),
+        ("job_secrets", "unapproved_job_key"),
+        ("reusable", "unapproved_job_key"),
+        ("job_env", "unapproved_job_key"),
+        ("container", "unapproved_job_key"),
+        ("services", "unapproved_job_key"),
+        ("job_permission", "job_permissions"),
+        ("runner", "untrusted_runner"),
+        ("runner_matrix", "untrusted_job_matrix"),
+        ("steps_empty", "steps_required"),
+        ("steps_type", "steps_required"),
+        ("step_type", "step_mapping_required"),
+        ("step_both", "step_operation_required"),
+        ("step_neither", "step_operation_required"),
+        ("action", "unpinned_or_untrusted_action"),
+        ("action_type", "unpinned_or_untrusted_action"),
+        ("imposter_pin", "unapproved_action_pin"),
+        ("credentials", "persisted_checkout_credentials"),
+        ("missing_checkout", "checkout_required"),
+        ("missing_gate", "policy_gate_required"),
+        ("pr_title_expression", "expression_in_execution"),
+        ("pr_body_expression", "expression_in_execution"),
+        ("pr_comment_expression", "expression_in_execution"),
+        ("secrets_expression", "expression_in_execution"),
+        ("codeql_permission", "job_permissions"),
     ],
 )
-def test_hostile_pr_workflow_changes_fail_closed(candidate, fault):
+def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
     name = "codeql.yml" if fault == "codeql_permission" else "ci.yml"
     data = load(candidate, name)
     job = data["jobs"]["analyze" if name == "codeql.yml" else "quality"]
@@ -106,6 +107,9 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault):
         ].pop("uses")
     elif fault in ("action", "action_type"):
         job["steps"][0]["uses"] = "actions/checkout@main" if fault == "action" else 7
+    elif fault == "imposter_pin":
+        # Approved family, well-formed but unreviewed commit (older or fork-network SHA).
+        job["steps"][0]["uses"] = "actions/checkout@" + "f" * 40
     elif fault == "credentials":
         job["steps"][0]["with"]["persist-credentials"] = True
     elif fault == "missing_checkout":
@@ -127,31 +131,56 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault):
         }[fault]
         job["steps"].append({"run": "echo ${{ " + expression + " }}"})
     save(candidate, data, name)
-    with pytest.raises(gate.PolicyError):
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)
 
 
+@pytest.mark.parametrize("job_name", ["test", "quality", "analyze"])
 @pytest.mark.parametrize(
-    "text",
+    "setting",
+    [{"group": "shared-lock", "cancel-in-progress": True}, "shared-lock"],
+    ids=["mapping", "string"],
+)
+def test_job_concurrency_cannot_cancel_protected_runs(candidate, job_name, setting):
+    # A literal job group is shared by every run, including main; even without
+    # cancel-in-progress, GitHub cancels the older pending job in that group.
+    name = "codeql.yml" if job_name == "analyze" else "ci.yml"
+    data = load(candidate, name)
+    data["jobs"][job_name]["concurrency"] = setting
+    save(candidate, data, name)
+    command = [sys.executable, ROOT / "scripts/check_ci_policy.py", candidate]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1
+    assert result.stdout.strip() == "CI policy rejected: unapproved_job_key"
+
+
+@pytest.mark.parametrize(
+    "text,code",
     [
-        "[]",
-        "on: {}\non: {}",
-        "on: &scope {}",
-        "on: *scope",
-        "on: !!python/object:danger {}",
-        "[unclosed",
-        "? [unhashable, key]\n: value",
-        "on: {}\nconcurrency: wrong",
+        ("[]", "workflow_mapping_required"),
+        ("on: {}\non: {}", "duplicate_yaml_key"),
+        ("on: &scope {}", "yaml_alias_or_anchor"),
+        ("on: *scope", "yaml_alias_or_anchor"),
+        ("on: !!python/object:danger {}", "ConstructorError"),
+        ("[unclosed", "ParserError"),
+        ("? [unhashable, key]\n: value", "TypeError"),
+        (None, "AttributeError"),
     ],
 )
 def test_malformed_yaml_and_aliases_reject_without_echoing_payload(
-    candidate, text, monkeypatch, capsys
+    candidate, text, code, monkeypatch, capsys
 ):
-    (candidate / ".github/workflows/ci.yml").write_text(text)
+    path = candidate / ".github/workflows/ci.yml"
+    if text is None:
+        # Valid triggers reach the workflow concurrency check with a non-mapping value.
+        original = path.read_text()
+        block = original[original.index("concurrency:") : original.index("permissions:")]
+        text = original.replace(block, "concurrency: wrong\n")
+    path.write_text(text)
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
     assert gate.main() == 1
     output = capsys.readouterr().out
-    assert "CI policy rejected:" in output
+    assert output.strip() == "CI policy rejected: " + code
     assert "danger" not in output and "Traceback" not in output
 
 
@@ -258,29 +287,31 @@ def test_native_yaml_object_command_never_runs(candidate, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    "fault",
+    "fault,code",
     [
-        "action_script",
-        "shell_expression",
-        "working_directory_expression",
-        "defaults",
-        "gate_if",
-        "gate_nonblocking",
-        "gate_directory",
-        "job_if",
-        "job_nonblocking",
-        "runner_detached",
-        "run_list",
-        "run_empty",
-        "with_list",
-        "env_list",
-        "input_list",
-        "action_input_expression",
-        "workflow_name_expression",
-        "upper_case_workflow",
+        ("action_script", "unapproved_action_family"),
+        ("shell_expression", "untrusted_expression"),
+        ("working_directory_expression", "untrusted_expression"),
+        ("defaults", "workflow_defaults"),
+        ("gate_if", "step_execution"),
+        ("gate_nonblocking", "step_failure_ignored"),
+        ("gate_directory", "policy_gate_execution"),
+        ("job_if", "unapproved_job_key"),
+        ("job_nonblocking", "unapproved_job_key"),
+        ("runner_detached", "untrusted_runner"),
+        ("run_list", "run_string_required"),
+        ("run_empty", "run_string_required"),
+        ("with_list", "action_input_mapping"),
+        ("env_list", "step_environment_mapping"),
+        ("input_list", "action_input_scalar"),
+        ("action_input_expression", "untrusted_expression"),
+        ("workflow_name_expression", "untrusted_expression"),
+        ("upper_case_workflow", "workflow_inventory"),
     ],
 )
-def test_adversarial_review_regressions_with_real_checker(candidate, fault, monkeypatch, capsys):
+def test_adversarial_review_regressions_with_real_checker(
+    candidate, fault, code, monkeypatch, capsys
+):
     data = load(candidate)
     job = data["jobs"]["quality"]
     policy = next(
@@ -333,7 +364,7 @@ def test_adversarial_review_regressions_with_real_checker(candidate, fault, monk
     save(candidate, data)
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
     assert gate.main() == 1
-    assert "CI policy rejected:" in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == "CI policy rejected: " + code
 
 
 @pytest.mark.parametrize("level", ["root", "github", "workflows", "leaf"])
@@ -387,9 +418,15 @@ def test_actual_workflow_links_are_rejected(candidate, level):
 
 
 @pytest.mark.parametrize(
-    "fault", ["scan_skip", "test_nonblocking", "diagnostic_condition", "run_with"]
+    "fault,code",
+    [
+        ("scan_skip", "step_execution"),
+        ("test_nonblocking", "step_failure_ignored"),
+        ("diagnostic_condition", "diagnostic_condition"),
+        ("run_with", "run_action_inputs"),
+    ],
 )
-def test_other_security_steps_cannot_be_silenced(candidate, fault):
+def test_other_security_steps_cannot_be_silenced(candidate, fault, code):
     data = load(candidate)
     if fault == "scan_skip":
         data["jobs"]["quality"]["steps"][-1]["if"] = False
@@ -400,5 +437,5 @@ def test_other_security_steps_cannot_be_silenced(candidate, fault):
     else:
         data["jobs"]["quality"]["steps"].append({"run": "echo safe", "with": {}})
     save(candidate, data)
-    with pytest.raises(gate.PolicyError):
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)

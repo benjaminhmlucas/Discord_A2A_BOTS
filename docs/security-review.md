@@ -22,6 +22,7 @@ secrets. Only the CodeQL job has permission to publish security findings. PR cod
 never runs in a `pull_request_target` context. Tests use hosted runners and synthetic
 identities, never a production bot home. Dependencies and actions receive weekly
 Dependabot PRs; updates must pass the same checks and approval requirements.
+Action updates also need the matching `ACTION_PINS` entry in the policy checker.
 
 Ruff checks and formats shipped Python and tests. Mypy strictly checks the provider
 contract and atomic health I/O boundary; the remaining dynamically configured
