@@ -37,6 +37,10 @@ def save(root, data, name="ci.yml"):
     [
         ("trigger", "untrusted_workflow_trigger"),
         ("added_trigger", "untrusted_workflow_trigger"),
+        ("missing_push", "untrusted_workflow_trigger"),
+        ("missing_pull_request", "untrusted_workflow_trigger"),
+        ("codeql_missing_schedule", "untrusted_workflow_trigger"),
+        ("triggers_list", "untrusted_workflow_trigger"),
         ("branches", "unbounded_branch_trigger"),
         ("push_branches", "unbounded_branch_trigger"),
         ("codeql_schedule", "untrusted_schedule"),
@@ -45,7 +49,11 @@ def save(root, data, name="ci.yml"):
         ("permissions", "workflow_permissions"),
         ("ambient_env", "ambient_workflow_environment"),
         ("cancellation", "main_run_cancellation"),
+        ("literal_group", "concurrency_group"),
         ("job_set", "unexpected_ci_jobs"),
+        ("jobs_list", "unexpected_ci_jobs"),
+        ("missing_policy_job", "unexpected_ci_jobs"),
+        ("codeql_missing_job", "unexpected_ci_jobs"),
         ("job_type", "job_mapping_required"),
         ("environment", "unapproved_job_key"),
         ("job_secrets", "unapproved_job_key"),
@@ -64,11 +72,13 @@ def save(root, data, name="ci.yml"):
         ("action", "unpinned_or_untrusted_action"),
         ("action_type", "unpinned_or_untrusted_action"),
         ("imposter_pin", "unapproved_action_pin"),
+        ("imposter_low_pin", "unapproved_action_pin"),
         ("credentials", "persisted_checkout_credentials"),
         ("credentials_omitted", "persisted_checkout_credentials"),
         ("credentials_zero", "persisted_checkout_credentials"),
         ("missing_checkout", "checkout_required"),
         ("missing_gate", "policy_gate_required"),
+        ("gate_nonblocking_command", "policy_gate_required"),
         ("pr_title_expression", "expression_in_execution"),
         ("multiline_expression", "expression_in_execution"),
         ("pr_body_expression", "expression_in_execution"),
@@ -83,6 +93,20 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
     job = data["jobs"]["analyze" if name == "codeql.yml" else "quality"]
     if fault == "trigger":
         data["on"]["pull_request_target"] = data["on"].pop("pull_request")
+    elif fault in ("missing_push", "missing_pull_request", "codeql_missing_schedule"):
+        data["on"].pop(
+            {"missing_push": "push", "missing_pull_request": "pull_request"}.get(fault, "schedule")
+        )
+    elif fault == "triggers_list":
+        data["on"] = ["push", "pull_request"]
+    elif fault in ("missing_policy_job", "codeql_missing_job"):
+        # Deleting the job that holds the policy gate (or CodeQL) must not pass.
+        data["jobs"].pop("analyze" if name == "codeql.yml" else "quality")
+    elif fault == "gate_nonblocking_command":
+        gate_step = next(
+            step for step in job["steps"] if step.get("run") == "python scripts/check_ci_policy.py"
+        )
+        gate_step["run"] += " || true"
     elif fault == "added_trigger":
         # Keeping push/pull_request must not excuse a privileged extra trigger.
         data["on"]["pull_request_target"] = {}
@@ -100,6 +124,11 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
         data["env"] = {"TOKEN": "synthetic"}
     elif fault == "cancellation":
         data["concurrency"]["cancel-in-progress"] = True
+    elif fault == "literal_group":
+        # A literal group shared by every run (sorts after the expected group text).
+        data["concurrency"]["group"] = "zz-shared-group"
+    elif fault == "jobs_list":
+        data["jobs"] = list(data["jobs"])
     elif fault == "job_set":
         data["jobs"]["extra"] = copy.deepcopy(job)
     elif fault == "job_type":
@@ -124,6 +153,8 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
         ].pop("uses")
     elif fault in ("action", "action_type"):
         job["steps"][0]["uses"] = "actions/checkout@main" if fault == "action" else 7
+    elif fault == "imposter_low_pin":
+        job["steps"][0]["uses"] = "actions/checkout@" + "0" * 40
     elif fault == "imposter_pin":
         # Approved family, well-formed but unreviewed commit (older or fork-network SHA).
         job["steps"][0]["uses"] = "actions/checkout@" + "f" * 40
