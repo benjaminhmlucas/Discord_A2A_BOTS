@@ -10,9 +10,9 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-contract-'));
   fs.mkdirSync(path.join(root, '.pm2'));
   const apps = [{name: 'synthetic', script: path.join(root, 'pythonw.exe'), cwd: root,
-    args: 'worker.py --safe', interpreter: 'none'}];
+    args: 'worker.py --safe', interpreter: 'none', windowsHide: true, env:{BOTBRIDGE_SHOW_CONSOLE:'0'}}];
   const dump = [{name: 'synthetic', pm_exec_path: apps[0].script, pm_cwd: root,
-    PM2_HOME: path.join(root, '.pm2'), windowsHide: true, args: ['worker.py', '--safe'], exec_interpreter: 'none'}];
+    PM2_HOME: path.join(root, '.pm2'), windowsHide: true, BOTBRIDGE_SHOW_CONSOLE:'0', env:{BOTBRIDGE_SHOW_CONSOLE:'0'}, args: ['worker.py', '--safe'], exec_interpreter: 'none'}];
   const save = () => fs.writeFileSync(path.join(root, '.pm2/dump.pm2'), JSON.stringify(dump));
   save();
   let rows = [{name: 'synthetic', pid: 42, pm2_env: {status: 'online'}}];
@@ -61,7 +61,7 @@ test('pause, live no-op, dead-daemon restore, missing-service restore and fatal-
   } finally {f.cleanup();}
 });
 
-for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'home', 'hide', 'args', 'interpreter']) {
+for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'home', 'hide', 'missing-hide', 'args', 'interpreter']) {
   test('reject unsafe or obsolete dump: ' + fault, () => {
     const f = fixture();
     try {
@@ -74,6 +74,7 @@ for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'h
         if (fault === 'cwd') f.dump[0].pm_cwd += '-other';
         if (fault === 'home') f.dump[0].PM2_HOME += '-other';
         if (fault === 'hide') f.dump[0].windowsHide = false;
+        if (fault === 'missing-hide') delete f.apps[0].windowsHide;
         if (fault === 'args') f.dump[0].args = 'other.py --safe';
         if (fault === 'interpreter') f.dump[0].exec_interpreter = 'node';
         f.save();
@@ -82,6 +83,34 @@ for (const fault of ['array', 'length', 'name', 'duplicate', 'script', 'cwd', 'h
     } finally {f.cleanup();}
   });
 }
+
+test('visible saved policy only matches an explicitly visible ecosystem', () => {
+  const f = fixture();
+  try {
+    f.apps[0].windowsHide = false;
+    f.dump[0].windowsHide = false;
+    f.apps[0].env.BOTBRIDGE_SHOW_CONSOLE = '1';
+    f.dump[0].BOTBRIDGE_SHOW_CONSOLE = '1';
+    f.dump[0].env.BOTBRIDGE_SHOW_CONSOLE = '1';
+    f.save();
+    recovery.validateDump(f.root,f.apps);
+    f.apps[0].windowsHide = true;
+    assert.throws(()=>recovery.validateDump(f.root,f.apps), /hidden-window policy/);
+  } finally {f.cleanup();}
+});
+
+test('reject saved console environment drift or missing environment before recovery', () => {
+  const f = fixture();
+  try {
+    f.dump[0].BOTBRIDGE_SHOW_CONSOLE = '1'; f.save();
+    assert.throws(()=>recovery.validateDump(f.root,f.apps), /console environment/);
+    f.dump[0].BOTBRIDGE_SHOW_CONSOLE = '0';
+    f.dump[0].env.BOTBRIDGE_SHOW_CONSOLE = '1'; f.save();
+    assert.throws(()=>recovery.validateDump(f.root,f.apps), /console environment/);
+    delete f.dump[0].env; f.save();
+    assert.throws(()=>recovery.validateDump(f.root,f.apps), /console environment/);
+  } finally {f.cleanup();}
+});
 
 test('callback/list/restore failures recorded and clients disconnected', async () => {
   const f = fixture();
