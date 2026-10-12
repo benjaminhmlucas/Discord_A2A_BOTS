@@ -57,9 +57,8 @@ cannot consume display or PR expressions.
 The policy job and its single checker step must run unconditionally and block on
 failure; within the inspected workflow fields, the checker cannot be retargeted
 through step environment or defaults (earlier candidate steps can still alter it;
-see below). The
-two-OS test matrix must actually use `matrix.os` as its runner. Linked/reparse-point
-workflow ancestors and leaves are rejected before parsing. These are checks of the
+see below). The two-OS test matrix must actually use `matrix.os` as its runner.
+Linked/reparse-point workflow ancestors and leaves are rejected before parsing. These are checks of the
 policy-inspected fields, not a complete replacement for GitHub's workflow schema.
 
 To inspect a candidate checkout, run the checker from a trusted installation with

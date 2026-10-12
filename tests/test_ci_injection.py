@@ -65,6 +65,8 @@ def save(root, data, name="ci.yml"):
         ("action_type", "unpinned_or_untrusted_action"),
         ("imposter_pin", "unapproved_action_pin"),
         ("credentials", "persisted_checkout_credentials"),
+        ("credentials_omitted", "persisted_checkout_credentials"),
+        ("credentials_zero", "persisted_checkout_credentials"),
         ("missing_checkout", "checkout_required"),
         ("missing_gate", "policy_gate_required"),
         ("pr_title_expression", "expression_in_execution"),
@@ -126,6 +128,11 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
         job["steps"][0]["uses"] = "actions/checkout@" + "f" * 40
     elif fault == "credentials":
         job["steps"][0]["with"]["persist-credentials"] = True
+    elif fault == "credentials_omitted":
+        # Omitting the input falls back to the action default, which persists credentials.
+        job["steps"][0].pop("with")
+    elif fault == "credentials_zero":
+        job["steps"][0]["with"]["persist-credentials"] = 0
     elif fault == "missing_checkout":
         job["steps"] = [
             step
@@ -242,6 +249,12 @@ def test_actual_cli_main_success_and_read_error(candidate, monkeypatch, capsys):
     path.mkdir()
     assert gate.main() == 1
     assert capsys.readouterr().out.splitlines()[-1] == "CI policy rejected: unsafe_workflow_file"
+    # A missing workflows directory is an OSError: static type name only, no path/traceback.
+    shutil.rmtree(candidate / ".github/workflows")
+    command = [sys.executable, ROOT / "scripts/check_ci_policy.py", candidate]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1 and result.stderr == ""
+    assert result.stdout.strip() == "CI policy rejected: FileNotFoundError"
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", "--help"])
     with pytest.raises(SystemExit) as stopped:
         runpy.run_path(str(ROOT / "scripts/check_ci_policy.py"), run_name="__main__")
