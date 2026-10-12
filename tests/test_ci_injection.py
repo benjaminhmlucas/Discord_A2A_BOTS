@@ -243,7 +243,7 @@ def test_unsupported_expression_in_action_input_is_rejected(candidate):
     data = load(candidate)
     data["jobs"]["quality"]["steps"][0]["with"]["token"] = "${{ secrets.PRODUCTION_CREDENTIAL }}"
     save(candidate, data)
-    with pytest.raises(gate.PolicyError, match="untrusted_expression"):
+    with pytest.raises(gate.PolicyError, match="unapproved_action_input"):
         gate.validate_directory(candidate)
 
 
@@ -255,3 +255,150 @@ def test_native_yaml_object_command_never_runs(candidate, monkeypatch, capsys):
     assert gate.main() == 1
     assert not owned.exists()
     assert "OWNED" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "action_script",
+        "shell_expression",
+        "working_directory_expression",
+        "defaults",
+        "gate_if",
+        "gate_nonblocking",
+        "gate_directory",
+        "job_if",
+        "job_nonblocking",
+        "runner_detached",
+        "run_list",
+        "run_empty",
+        "with_list",
+        "env_list",
+        "input_list",
+        "action_input_expression",
+        "workflow_name_expression",
+        "upper_case_workflow",
+    ],
+)
+def test_adversarial_review_regressions_with_real_checker(candidate, fault, monkeypatch, capsys):
+    data = load(candidate)
+    job = data["jobs"]["quality"]
+    policy = next(
+        step for step in job["steps"] if step.get("run") == "python scripts/check_ci_policy.py"
+    )
+    if fault == "action_script":
+        job["steps"].append(
+            {
+                "uses": "actions/github-script@" + "a" * 40,
+                "with": {"script": "${{ github.workflow }}"},
+            }
+        )
+    elif fault in ("shell_expression", "working_directory_expression"):
+        job["steps"].append(
+            {
+                "run": "echo safe",
+                "shell"
+                if fault == "shell_expression"
+                else "working-directory": "${{ github.workflow }}",
+            }
+        )
+    elif fault == "defaults":
+        data["defaults"] = {"run": {"shell": "${{ github.workflow }}"}}
+    elif fault in ("gate_if", "gate_nonblocking", "gate_directory"):
+        policy[
+            {
+                "gate_if": "if",
+                "gate_nonblocking": "continue-on-error",
+                "gate_directory": "working-directory",
+            }[fault]
+        ] = {"gate_if": False, "gate_nonblocking": True, "gate_directory": "other-checkout"}[fault]
+    elif fault in ("job_if", "job_nonblocking"):
+        job["if" if fault == "job_if" else "continue-on-error"] = fault != "job_if"
+    elif fault == "runner_detached":
+        data["jobs"]["test"]["runs-on"] = "ubuntu-24.04"
+    elif fault in ("run_list", "run_empty"):
+        job["steps"].append({"run": ["echo invalid"] if fault == "run_list" else "  "})
+    elif fault == "with_list":
+        job["steps"][0]["with"] = ["invalid"]
+    elif fault == "env_list":
+        job["steps"].append({"run": "echo safe", "env": ["invalid"]})
+    elif fault == "input_list":
+        job["steps"][1]["with"]["python-version"] = ["invalid"]
+    elif fault == "action_input_expression":
+        job["steps"][1]["with"]["python-version"] = "${{ github.workflow }}"
+    elif fault == "workflow_name_expression":
+        data["name"] = "${{ github.event.pull_request.title }}"
+    else:
+        (candidate / ".github/workflows/extra.YAML").write_text("on: pull_request_target")
+    save(candidate, data)
+    monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
+    assert gate.main() == 1
+    assert "CI policy rejected:" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("level", ["root", "github", "workflows", "leaf"])
+def test_actual_workflow_links_are_rejected(candidate, level):
+    mapping = {
+        "root": candidate,
+        "github": candidate / ".github",
+        "workflows": candidate / ".github/workflows",
+        "leaf": candidate / ".github/workflows/ci.yml",
+    }
+    linked = mapping[level]
+    target = candidate.parent / (candidate.name + "-link-target-" + level)
+    # Every move/create stays in this test's owned temporary parent; no shared paths.
+    assert linked.resolve().is_relative_to(candidate.parent.resolve())
+    assert target.resolve().is_relative_to(candidate.parent.resolve()) and not target.exists()
+    if os.name == "nt" and level == "leaf":
+        # A directory named ci.yml is a real malformed leaf; no symlink privilege needed.
+        linked.rename(target)
+        linked.mkdir()
+        with pytest.raises(gate.PolicyError, match="unsafe_workflow_file"):
+            gate.validate_directory(candidate)
+        return
+    linked.rename(target)
+    if os.name == "nt":
+
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+
+        subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path "
+                + quote(linked)
+                + " -Target "
+                + quote(target)
+                + " | Out-Null",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        linked.symlink_to(target, target_is_directory=target.is_dir())
+    with pytest.raises(gate.PolicyError, match="linked_workflow_path"):
+        gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize(
+    "fault", ["scan_skip", "test_nonblocking", "diagnostic_condition", "run_with"]
+)
+def test_other_security_steps_cannot_be_silenced(candidate, fault):
+    data = load(candidate)
+    if fault == "scan_skip":
+        data["jobs"]["quality"]["steps"][-1]["if"] = False
+    elif fault == "test_nonblocking":
+        data["jobs"]["test"]["steps"][4]["continue-on-error"] = True
+    elif fault == "diagnostic_condition":
+        next(step for step in data["jobs"]["test"]["steps"] if "if" in step)["if"] = True
+    else:
+        data["jobs"]["quality"]["steps"].append({"run": "echo safe", "with": {}})
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError):
+        gate.validate_directory(candidate)

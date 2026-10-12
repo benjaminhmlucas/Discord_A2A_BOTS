@@ -42,6 +42,15 @@ CodeQL analysis job may publish security events. Main runs must not cancel each
 other. The checker runs inside the existing required Quality and dependency audits
 job, so the five required check names and independent approval rules are unchanged.
 
+Expressions are permitted by structural location, not a global keyword list.
+Only the action families and input fields used by these two workflows are allowed.
+Executable shell/retargeting fields cannot consume display or PR expressions.
+The policy job and its single checker step must run unconditionally and block on
+failure; the checker cannot be retargeted through step/default directories. The
+two-OS test matrix must actually use `matrix.os` as its runner. Linked/reparse-point
+workflow ancestors and leaves are rejected before parsing. These are checks of the
+policy-inspected fields, not a complete replacement for GitHub's workflow schema.
+
 To inspect a candidate checkout, run the checker from a trusted installation with
 development dependencies installed:
 
