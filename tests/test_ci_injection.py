@@ -36,7 +36,12 @@ def save(root, data, name="ci.yml"):
     "fault,code",
     [
         ("trigger", "untrusted_workflow_trigger"),
+        ("added_trigger", "untrusted_workflow_trigger"),
         ("branches", "unbounded_branch_trigger"),
+        ("push_branches", "unbounded_branch_trigger"),
+        ("codeql_schedule", "untrusted_schedule"),
+        ("fail_fast_int", "untrusted_job_matrix"),
+        ("step_name_expression", "untrusted_expression"),
         ("permissions", "workflow_permissions"),
         ("ambient_env", "ambient_workflow_environment"),
         ("cancellation", "main_run_cancellation"),
@@ -70,13 +75,22 @@ def save(root, data, name="ci.yml"):
     ],
 )
 def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
-    name = "codeql.yml" if fault == "codeql_permission" else "ci.yml"
+    name = "codeql.yml" if fault.startswith("codeql_") else "ci.yml"
     data = load(candidate, name)
     job = data["jobs"]["analyze" if name == "codeql.yml" else "quality"]
     if fault == "trigger":
         data["on"]["pull_request_target"] = data["on"].pop("pull_request")
-    elif fault == "branches":
-        data["on"]["pull_request"] = {"branches": ["*"]}
+    elif fault == "added_trigger":
+        # Keeping push/pull_request must not excuse a privileged extra trigger.
+        data["on"]["pull_request_target"] = {}
+    elif fault in ("branches", "push_branches"):
+        data["on"]["push" if fault == "push_branches" else "pull_request"] = {"branches": ["*"]}
+    elif fault == "codeql_schedule":
+        data["on"]["schedule"] = [{"cron": "*/5 * * * *"}]
+    elif fault == "fail_fast_int":
+        data["jobs"]["test"]["strategy"]["fail-fast"] = 0
+    elif fault == "step_name_expression":
+        job["steps"][0]["name"] = "${{ github.event.pull_request.title }}"
     elif fault == "permissions":
         data["permissions"] = "write-all"
     elif fault == "ambient_env":
@@ -478,6 +492,37 @@ def test_remaining_structural_guards_are_asserted(candidate, fault, code):
     save(candidate, data)
     with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize(
+    "name,old,new",
+    [
+        # PyYAML ends these comments at the separator; a YAML 1.2 parser keeps the rest
+        # of the line in the comment, dropping the setting the checker approved.
+        (
+            "ci.yml",
+            "        with:\n          persist-credentials: false",
+            "        with: # note           persist-credentials: false",
+        ),
+        ("ci.yml", "permissions:\n  contents: read", "permissions: # x\x85  contents: read"),
+        (
+            "ci.yml",
+            "      - run: python scripts/check_ci_policy.py",
+            "      # skip       - run: python scripts/check_ci_policy.py",
+        ),
+        ("codeql.yml", "name: CodeQL", "name: CodeQLé"),
+    ],
+    ids=["line_separator", "next_line", "paragraph_separator", "latin"],
+)
+def test_non_ascii_workflow_text_is_rejected_by_real_cli(candidate, name, old, new):
+    path = candidate / ".github/workflows" / name
+    original = path.read_text(encoding="utf-8")
+    assert original.count(old) >= 1
+    path.write_bytes(original.replace(old, new, 1).encode("utf-8"))
+    command = [sys.executable, ROOT / "scripts/check_ci_policy.py", candidate]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1
+    assert result.stdout.strip() == "CI policy rejected: non_ascii_workflow"
 
 
 def test_explicit_yaml_tags_and_deep_nesting_fail_closed(candidate, monkeypatch, capsys):

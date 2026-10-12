@@ -40,7 +40,7 @@ their `run` commands or candidate Python/JavaScript code. It rejects unexpected
 workflows/triggers/jobs, untrusted runners, excessive permissions, production job
 environments, actions not pinned to the reviewed commits, persistent checkout
 credentials, direct PR/secrets expressions, duplicate YAML keys, aliases, explicit
-YAML tags and malformed configuration. Only the CodeQL analysis job may publish
+YAML tags, non-ASCII text and malformed configuration. Only the CodeQL analysis job may publish
 security events.
 Main runs must not cancel each other: job keys are an allowlist, so job-level
 `concurrency`, `if`, `continue-on-error`, `env`, `uses` and similar settings are
@@ -55,7 +55,9 @@ Step keys are also an allowlist, so `shell`, `working-directory`,
 `continue-on-error` and differently cased keys are rejected; `run` and `env`
 cannot consume display or PR expressions.
 The policy job and its single checker step must run unconditionally and block on
-failure; the checker cannot be retargeted through step environment or defaults. The
+failure; within the inspected workflow fields, the checker cannot be retargeted
+through step environment or defaults (earlier candidate steps can still alter it;
+see below). The
 two-OS test matrix must actually use `matrix.os` as its runner. Linked/reparse-point
 workflow ancestors and leaves are rejected before parsing. These are checks of the
 policy-inspected fields, not a complete replacement for GitHub's workflow schema.

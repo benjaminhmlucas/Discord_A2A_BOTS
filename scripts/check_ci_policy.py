@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+PRINTABLE = re.compile(r"[\t\n\r\x20-\x7e]*")
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 ACTION_INPUTS = {
     "actions/checkout": {"persist-credentials": ()},
@@ -94,8 +95,11 @@ def validate_expressions(value, permitted=(), code="untrusted_expression"):
 
 
 def validate_workflow(text, name):
+    # YAML 1.1 (PyYAML) ends comments at U+0085/U+2028/U+2029; YAML 1.2 does not. Plain
+    # printable ASCII removes that and other parser disagreements about hidden fields.
+    require(PRINTABLE.fullmatch(text) is not None, "non_ascii_workflow")
     # Reject aliases as well as anchors: cyclic or shared structures can hide fields.
-    # Explicit tags (e.g. `!!bool off`) can make PyYAML and GitHub disagree on a value.
+    # Explicit tags (e.g. `!!bool off`) are resolved differently across YAML versions.
     tokens = list(yaml.scan(text))
     require(
         not any(isinstance(token, (yaml.AnchorToken, yaml.AliasToken)) for token in tokens),
@@ -113,6 +117,8 @@ def validate_workflow(text, name):
     require(isinstance(triggers, dict) and set(triggers) == allowed, "untrusted_workflow_trigger")
     for event in ("push", "pull_request"):
         require(triggers[event] == {"branches": ["main"]}, "unbounded_branch_trigger")
+    if name == "codeql.yml":
+        require(triggers["schedule"] == [{"cron": "23 8 * * 1"}], "untrusted_schedule")
     require(workflow.get("permissions") == {"contents": "read"}, "workflow_permissions")
     require("env" not in workflow, "ambient_workflow_environment")
     require("defaults" not in workflow, "workflow_defaults")
@@ -151,8 +157,10 @@ def validate_workflow(text, name):
                 if name == "codeql.yml"
                 else {"os": ["ubuntu-24.04", "windows-2022"]}
             )
+            strategy = job.get("strategy")
             require(
-                job.get("strategy") == {"fail-fast": False, "matrix": matrix},
+                strategy == {"fail-fast": False, "matrix": matrix}
+                and strategy["fail-fast"] is False,  # 0 == False, but 0 is not a boolean.
                 "untrusted_job_matrix",
             )
         for key, value in job.items():
