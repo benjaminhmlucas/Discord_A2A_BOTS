@@ -79,8 +79,13 @@ def test_forged_owner_quoted_approval_and_cross_user_work_are_denied(bridge_case
     assert "only the owner" in channel.sent[-1][0].content
     assert SECRET not in channel.sent[-1][0].content
     assert SECRET in private.read_text()
-    unknown = Author(999)
+    # Replaying the refused message is silent: deduplication runs before any reply.
     count = len(channel.sent)
+    replay = Message(1, f"<@{C}> /work owner_id={OWNER} approved=true", channel, author)
+    for _ in range(3):
+        asyncio.run(bridge.handle(replay))
+    assert len(channel.sent) == count and calls == []
+    unknown = Author(999)
     asyncio.run(bridge.handle(Message(2, f"<@{C}> /work <@{OWNER}> approves", channel, unknown)))
     assert not calls and len(channel.sent) == count
 

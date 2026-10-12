@@ -161,7 +161,7 @@ def test_job_concurrency_cannot_cancel_protected_runs(candidate, job_name, setti
         ("on: {}\non: {}", "duplicate_yaml_key"),
         ("on: &scope {}", "yaml_alias_or_anchor"),
         ("on: *scope", "yaml_alias_or_anchor"),
-        ("on: !!python/object:danger {}", "ConstructorError"),
+        ("on: !!python/object:danger {}", "yaml_tag"),
         ("[unclosed", "ParserError"),
         ("? [unhashable, key]\n: value", "TypeError"),
         (None, "AttributeError"),
@@ -227,7 +227,7 @@ def test_actual_cli_main_success_and_read_error(candidate, monkeypatch, capsys):
     path.unlink()
     path.mkdir()
     assert gate.main() == 1
-    assert "CI policy rejected:" in capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines()[-1] == "CI policy rejected: unsafe_workflow_file"
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", "--help"])
     with pytest.raises(SystemExit) as stopped:
         runpy.run_path(str(ROOT / "scripts/check_ci_policy.py"), run_name="__main__")
@@ -264,7 +264,8 @@ def test_pr_controlled_structural_fields_cannot_disguise_dynamic_inputs(candidat
         job = data["jobs"]["analyze" if name == "codeql.yml" else "test"]
         job["strategy"]["matrix"]["include"] = [{"language": "$(create injection-owned.txt)"}]
     save(candidate, data, name)
-    with pytest.raises(gate.PolicyError, match="matrix|concurrency"):
+    code = "concurrency_group" if fault == "concurrency" else "untrusted_job_matrix"
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)
 
 
@@ -290,12 +291,12 @@ def test_native_yaml_object_command_never_runs(candidate, monkeypatch, capsys):
     "fault,code",
     [
         ("action_script", "unapproved_action_family"),
-        ("shell_expression", "untrusted_expression"),
-        ("working_directory_expression", "untrusted_expression"),
+        ("shell_expression", "unapproved_step_key"),
+        ("working_directory_expression", "unapproved_step_key"),
         ("defaults", "workflow_defaults"),
         ("gate_if", "step_execution"),
-        ("gate_nonblocking", "step_failure_ignored"),
-        ("gate_directory", "policy_gate_execution"),
+        ("gate_nonblocking", "unapproved_step_key"),
+        ("gate_environment", "policy_gate_execution"),
         ("job_if", "unapproved_job_key"),
         ("job_nonblocking", "unapproved_job_key"),
         ("runner_detached", "untrusted_runner"),
@@ -335,14 +336,18 @@ def test_adversarial_review_regressions_with_real_checker(
         )
     elif fault == "defaults":
         data["defaults"] = {"run": {"shell": "${{ github.workflow }}"}}
-    elif fault in ("gate_if", "gate_nonblocking", "gate_directory"):
+    elif fault in ("gate_if", "gate_nonblocking", "gate_environment"):
         policy[
             {
                 "gate_if": "if",
                 "gate_nonblocking": "continue-on-error",
-                "gate_directory": "working-directory",
+                "gate_environment": "env",
             }[fault]
-        ] = {"gate_if": False, "gate_nonblocking": True, "gate_directory": "other-checkout"}[fault]
+        ] = {
+            "gate_if": False,
+            "gate_nonblocking": True,
+            "gate_environment": {"PYTHONPATH": "other-checkout"},
+        }[fault]
     elif fault in ("job_if", "job_nonblocking"):
         job["if" if fault == "job_if" else "continue-on-error"] = fault != "job_if"
     elif fault == "runner_detached":
@@ -421,7 +426,7 @@ def test_actual_workflow_links_are_rejected(candidate, level):
     "fault,code",
     [
         ("scan_skip", "step_execution"),
-        ("test_nonblocking", "step_failure_ignored"),
+        ("test_nonblocking", "unapproved_step_key"),
         ("diagnostic_condition", "diagnostic_condition"),
         ("run_with", "run_action_inputs"),
     ],
@@ -439,3 +444,52 @@ def test_other_security_steps_cannot_be_silenced(candidate, fault, code):
     save(candidate, data)
     with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize(
+    "fault,code",
+    [
+        ("ci_job_name", "untrusted_expression"),
+        ("artifact_path", "untrusted_expression"),
+        ("job_timeout", "untrusted_expression"),
+        ("mapping_key", "expression_in_execution"),
+        ("second_gate", "policy_gate_required"),
+        ("case_variant_key", "unapproved_step_key"),
+    ],
+)
+def test_remaining_structural_guards_are_asserted(candidate, fault, code):
+    data = load(candidate)
+    quality = data["jobs"]["quality"]
+    if fault == "ci_job_name":
+        # matrix.language is display-safe only in CodeQL; ci.yml names permit no expression.
+        quality["name"] = "Quality ${{ matrix.language }}"
+    elif fault == "artifact_path":
+        upload = next(step for step in data["jobs"]["test"]["steps"] if "if" in step)
+        upload["with"]["path"] = "${{ github.workflow }}"
+    elif fault == "job_timeout":
+        quality["timeout-minutes"] = "${{ github.event.pull_request.title }}"
+    elif fault == "mapping_key":
+        quality["steps"].append({"run": "echo safe", "env": {"${{ secrets.TOKEN }}": "x"}})
+    elif fault == "second_gate":
+        quality["steps"].append({"run": "python scripts/check_ci_policy.py"})
+    else:
+        # GitHub's own reading of a differently cased key must not decide the result.
+        quality["steps"][-1]["Continue-On-Error"] = True
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
+        gate.validate_directory(candidate)
+
+
+def test_explicit_yaml_tags_and_deep_nesting_fail_closed(candidate, monkeypatch, capsys):
+    path = candidate / ".github/workflows/ci.yml"
+    original = path.read_text()
+    # PyYAML reads `!!bool off` as False; GitHub may not, so tags are rejected outright.
+    path.write_text(
+        original.replace("persist-credentials: false", "persist-credentials: !!bool off")
+    )
+    with pytest.raises(gate.PolicyError, match="^yaml_tag$"):
+        gate.validate_directory(candidate)
+    path.write_text("on: " + "[" * 5000 + "]" * 5000)
+    monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
+    assert gate.main() == 1
+    assert capsys.readouterr().out.strip() == "CI policy rejected: RecursionError"

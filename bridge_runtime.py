@@ -262,20 +262,21 @@ class Bridge:
                 return  # No ad-hoc bot chains, parked-bot exceptions, or legacy markers.
         text = re.sub(r"<@!?\d+>", "", STRIP.sub("", content)).strip()
         start = START.fullmatch(text) if not message.author.bot else None
+        if start:
+            first = next((i for i in mentions if i in self.config["enabled_bots"]), None)
+            if first != self.bot_id:
+                return
+        # Deduplicate before any reply, so a replayed message (even a refused one) is silent.
+        if self.state.seen(self.bot_id, message.id):
+            if session:
+                self.state.fail(session[0])
+            return
         try:
             work = authorize_work(text, message, self.bot_id, CODEX_APP_ID, self.config)
         except WorkDenied as denied:
             if session:
                 self.state.fail(session[0])  # A handoff cannot leave its discussion busy.
             await self.send(message.channel, str(denied), message)
-            return
-        if start:
-            first = next((i for i in mentions if i in self.config["enabled_bots"]), None)
-            if first != self.bot_id:
-                return
-        if self.state.seen(self.bot_id, message.id):
-            if session:
-                self.state.fail(session[0])
             return
         if start:
             turns = max(1, min(int(start.group(1) or 3), self.config["max_turns"]))

@@ -44,6 +44,7 @@ ACTION_PINS = {
 }
 # Allowlist, not denylist: if/continue-on-error/concurrency/env/uses etc. are rejected.
 JOB_KEYS = {"name", "runs-on", "timeout-minutes", "permissions", "strategy", "steps"}
+STEP_KEYS = {"name", "id", "uses", "with", "run", "env", "if"}
 
 
 class PolicyError(ValueError):
@@ -94,12 +95,13 @@ def validate_expressions(value, permitted=(), code="untrusted_expression"):
 
 def validate_workflow(text, name):
     # Reject aliases as well as anchors: cyclic or shared structures can hide fields.
+    # Explicit tags (e.g. `!!bool off`) can make PyYAML and GitHub disagree on a value.
+    tokens = list(yaml.scan(text))
     require(
-        not any(
-            isinstance(token, (yaml.AnchorToken, yaml.AliasToken)) for token in yaml.scan(text)
-        ),
+        not any(isinstance(token, (yaml.AnchorToken, yaml.AliasToken)) for token in tokens),
         "yaml_alias_or_anchor",
     )
+    require(not any(isinstance(token, yaml.TagToken) for token in tokens), "yaml_tag")
     loader = UniqueLoader(text)
     try:
         workflow = loader.get_single_data()
@@ -163,7 +165,7 @@ def validate_workflow(text, name):
         for step in steps:
             require(isinstance(step, dict), "step_mapping_required")
             require(("uses" in step) != ("run" in step), "step_operation_required")
-            require(step.get("continue-on-error", False) is False, "step_failure_ignored")
+            require(set(step) <= STEP_KEYS, "unapproved_step_key")
             diagnostic = str(step.get("uses", "")).startswith("actions/upload-artifact@")
             if diagnostic:
                 require(
@@ -230,7 +232,6 @@ def validate_directory(root=ROOT):
     directory = root / ".github/workflows"
     for ancestor in (root, root / ".github", directory):
         owned_path(ancestor)
-    require(directory.resolve().is_relative_to(root.resolve()), "workflow_containment")
     paths = sorted(path for path in directory.iterdir() if path.suffix.lower() in {".yml", ".yaml"})
     require({path.name for path in paths} == {"ci.yml", "codeql.yml"}, "workflow_inventory")
     for path in paths:
