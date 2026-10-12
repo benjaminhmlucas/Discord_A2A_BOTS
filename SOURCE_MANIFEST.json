@@ -68,7 +68,7 @@
     "tests/fixtures/prompt_injection.json": "2ca75b18595b5476e86c1e0b075053c362629880038635c2caa2cf552a287db2",
     "tests/fixtures/public_context.md": "800218d0c4251c74316ae50c6fd45cb3c8a5daa5f0e1146d761854696be8e8dc",
     "tests/test_bridge.py": "e623b122911ec38c6ea1d260f34f8732d829ebd6d185b36145d59fd8e668a793",
-    "tests/test_ci_injection.py": "369c9a6e291b26b38ca03f570b7384a19050ce89db1371bd11d22ef38fde7fe7",
+    "tests/test_ci_injection.py": "3a7dc26a4052072007ceb1041c80efb9668c26a03aa36c0c3be11eefc837bf05",
     "tests/test_ci_policy.py": "f7add8007d1a5e6fd9a44336be74b031d49b7454982724e51d11c2115715d409",
     "tests/test_console_windows.py": "adef95ed7656b0c73d706b6ab1b8bf94cefeab3d7c05e5aa9771766bea739d4d",
     "tests/test_coverage_gate.py": "65a8e6a8891b6cf598d639c3de1b3bfbb4dccaa45ef764ebf43779f00821fb3a",

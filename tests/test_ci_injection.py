@@ -55,12 +55,6 @@ def save(root, data, name="ci.yml"):
         ("missing_policy_job", "unexpected_ci_jobs"),
         ("codeql_missing_job", "unexpected_ci_jobs"),
         ("job_type", "job_mapping_required"),
-        ("environment", "unapproved_job_key"),
-        ("job_secrets", "unapproved_job_key"),
-        ("reusable", "unapproved_job_key"),
-        ("job_env", "unapproved_job_key"),
-        ("container", "unapproved_job_key"),
-        ("services", "unapproved_job_key"),
         ("job_permission", "job_permissions"),
         ("runner", "untrusted_runner"),
         ("runner_matrix", "untrusted_job_matrix"),
@@ -133,10 +127,6 @@ def test_hostile_pr_workflow_changes_fail_closed(candidate, fault, code):
         data["jobs"]["extra"] = copy.deepcopy(job)
     elif fault == "job_type":
         data["jobs"]["quality"] = "untrusted"
-    elif fault in ("environment", "job_secrets", "reusable", "job_env", "container", "services"):
-        job[{"job_secrets": "secrets", "reusable": "uses", "job_env": "env"}.get(fault, fault)] = (
-            "production"
-        )
     elif fault in ("job_permission", "codeql_permission"):
         job["permissions"] = {"contents": "write", "security-events": "write"}
     elif fault == "runner":
@@ -353,14 +343,10 @@ def test_native_yaml_object_command_never_runs(candidate, monkeypatch, capsys):
     "fault,code",
     [
         ("action_script", "unapproved_action_family"),
-        ("shell_expression", "unapproved_step_key"),
-        ("working_directory_expression", "unapproved_step_key"),
         ("defaults", "workflow_defaults"),
         ("gate_if", "step_execution"),
         ("gate_nonblocking", "unapproved_step_key"),
         ("gate_environment", "policy_gate_execution"),
-        ("job_if", "unapproved_job_key"),
-        ("job_nonblocking", "unapproved_job_key"),
         ("runner_detached", "untrusted_runner"),
         ("run_list", "run_string_required"),
         ("run_empty", "run_string_required"),
@@ -387,15 +373,6 @@ def test_adversarial_review_regressions_with_real_checker(
                 "with": {"script": "${{ github.workflow }}"},
             }
         )
-    elif fault in ("shell_expression", "working_directory_expression"):
-        job["steps"].append(
-            {
-                "run": "echo safe",
-                "shell"
-                if fault == "shell_expression"
-                else "working-directory": "${{ github.workflow }}",
-            }
-        )
     elif fault == "defaults":
         data["defaults"] = {"run": {"shell": "${{ github.workflow }}"}}
     elif fault in ("gate_if", "gate_nonblocking", "gate_environment"):
@@ -410,8 +387,6 @@ def test_adversarial_review_regressions_with_real_checker(
             "gate_nonblocking": True,
             "gate_environment": {"PYTHONPATH": "other-checkout"},
         }[fault]
-    elif fault in ("job_if", "job_nonblocking"):
-        job["if" if fault == "job_if" else "continue-on-error"] = fault != "job_if"
     elif fault == "runner_detached":
         data["jobs"]["test"]["runs-on"] = "ubuntu-24.04"
     elif fault in ("run_list", "run_empty"):
@@ -586,3 +561,45 @@ def test_explicit_yaml_tags_and_deep_nesting_fail_closed(candidate, monkeypatch,
     monkeypatch.setattr(sys, "argv", ["check_ci_policy.py", str(candidate)])
     assert gate.main() == 1
     assert capsys.readouterr().out.strip() == "CI policy rejected: RecursionError"
+
+
+# GitHub job/step settings outside the allowlists, so widening JOB_KEYS or STEP_KEYS
+# fails a test (concurrency and continue-on-error have dedicated cases above).
+JOB_SETTINGS = {
+    "defaults": {"run": {"shell": 'bash -c "exit 0" {0}'}},
+    "needs": ["test"],
+    "if": "false",
+    "continue-on-error": True,
+    "environment": "production",
+    "env": {"TOKEN": "synthetic"},
+    "outputs": {"value": "x"},
+    "container": "ubuntu:24.04",
+    "services": {"db": {"image": "postgres"}},
+    "uses": "./.github/workflows/other.yml",
+    "with": {"input": "x"},
+    "secrets": "inherit",
+    "snapshot": "image",
+}
+STEP_SETTINGS = {
+    "timeout-minutes": 1,
+    "shell": 'bash -c "exit 0" {0}',
+    "working-directory": "other-checkout",
+}
+
+
+@pytest.mark.parametrize("key", JOB_SETTINGS)
+def test_every_unlisted_job_setting_is_rejected(candidate, key):
+    data = load(candidate)
+    data["jobs"]["quality"][key] = JOB_SETTINGS[key]
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match="^unapproved_job_key$"):
+        gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize("key", STEP_SETTINGS)
+def test_every_unlisted_step_setting_is_rejected(candidate, key):
+    data = load(candidate)
+    data["jobs"]["quality"]["steps"][-1][key] = STEP_SETTINGS[key]
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match="^unapproved_step_key$"):
+        gate.validate_directory(candidate)
