@@ -85,6 +85,12 @@ failures and timeouts remain charged because provider work may already have occu
 Unused reservations expire after the configured total deadline plus 25 seconds of
 cleanup grace, so a crash cannot strand daily capacity for a full day. Expired
 reservations cannot start a provider or claim capacity already reassigned elsewhere.
+When optional scoped capabilities are configured, the same daily reservation is
+charged before the capability attempt; the following provider reply does not charge
+it twice. Queue failures still refund unused daily capacity. See
+[scoped capabilities](scoped-capabilities.md) for the operator-owned tool registry,
+DNS pinning, internal-origin exceptions, credential/audit rules, protocol limits and
+per-server acceptance requirements. This feature is disabled by default.
 
 Tool-enabled `/work` requires the numeric owner, CodexBot, explicit enablement and
 successful private-DM setup. Only the owner's request text is included; channel
