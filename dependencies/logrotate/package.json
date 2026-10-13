@@ -6,7 +6,7 @@
     "pm2-logrotate": "3.0.0"
   },
   "overrides": {
-    "pm2": "7.0.1",
+    "pm2": "7.0.4",
     "basic-ftp": "6.2.2",
     "chokidar": "4.0.3",
     "js-yaml": "4.3.2",

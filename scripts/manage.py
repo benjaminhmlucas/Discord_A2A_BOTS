@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 creation_flags = importlib.import_module("scripts.console_windows").creation_flags
 
-# PM2 7.0.1 global options, used only to select the metadata optimization.
+# PM2 7.0.4 global options, used only to select the metadata optimization.
 # Unknown options fall back to normal PM2 behavior; argv is always forwarded intact.
 PM2_SWITCHES = set(
     """

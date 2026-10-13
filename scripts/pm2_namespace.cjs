@@ -1,13 +1,13 @@
 // Scope every PM2 copy (including module dependencies) to this PM2_HOME on Windows.
-// PM2 7.0.1 otherwise replaces home-relative sockets with fixed global named pipes.
+// PM2 7.0.4 otherwise replaces home-relative sockets with fixed global named pipes.
 const Module = require('node:module');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 function validate(root) {
   const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  if (metadata.name !== 'pm2' || metadata.version !== '7.0.1')
-    throw new Error('Unsupported PM2 package; this namespace adapter requires pm2@7.0.1');
+  if (metadata.name !== 'pm2' || metadata.version !== '7.0.4')
+    throw new Error('Unsupported PM2 package; this namespace adapter requires pm2@7.0.4');
 }
 const load = Module._load;
 Module._load = function (request, parent, isMain) {
