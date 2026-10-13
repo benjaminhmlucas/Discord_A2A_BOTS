@@ -72,7 +72,7 @@
     "tests/test_hardening.py": "864c06bb92eab36379d15c8dc9b9f5a243866df0cf80085b47a17dc45df10e46",
     "tests/test_hidden_windows.cjs": "5e417ab9b341829b5f248d43340ae5dacbed588473c5a403814a8323cf3b6cb2",
     "tests/test_hidden_windows.py": "de113e734a6efbe52da11aa967c9e2ed19b9d26605ec53efbfa552013246564d",
-    "tests/test_http_dependency_compatibility.py": "11f499abd36463482af5478aa6f93a93c21a20a1668550b0a408e58769a97bb1",
+    "tests/test_http_dependency_compatibility.py": "91f7cc05f78d828f8b6b3469cddb751da7a16f6b7a35b78c14d16414ccbfcae0",
     "tests/test_live_providers.py": "03f9a8c793f4c1e6e5e37e8092c1e6c762812a939e2174d84016b031cb3fbcc6",
     "tests/test_log_manager.py": "94b441187975bb983be34a7192719fc8539c3ffe76b967aa03cb184577698a59",
     "tests/test_log_permissions.py": "232149a182733da260f21ac6e66ab3e3e95f74421e02beaa9d3870853bbb9a49",
