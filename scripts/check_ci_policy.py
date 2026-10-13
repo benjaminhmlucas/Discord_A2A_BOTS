@@ -36,8 +36,8 @@ ACTION_INPUTS = {
 }
 # Exact reviewed commits: an action update must change this trusted list deliberately.
 ACTION_PINS = {
-    "actions/checkout": "d23441a48e516b6c34aea4fa41551a30e30af803",
-    "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
+    "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
     "actions/setup-node": "249970729cb0ef3589644e2896645e5dc5ba9c38",
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
     "github/codeql-action/init": "24c54180a607b1449ed407dd24f251e4e9147c8d",
