@@ -87,11 +87,11 @@ Run `scripts/start.ps1`. Startup invokes Node directly with the configured local
 & .\scripts\pm2.ps1 save
 ```
 
-Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.1 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
+Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.4 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
 
 The preloader rejects other PM2 versions and installs logrotate from its committed integrity lock using npm ci with lifecycle scripts disabled. This also pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
 
-PM2 7.0.1 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
+PM2 7.0.4 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
 
 The ecosystem contains all three launchers; a disabled identity exits with code 75 and is excluded from discussions and health checks. To change participation, edit `enabled_bots` to a subset of your configured numeric bot IDs and restart the affected processes. Keep all three identity mappings configured.
 

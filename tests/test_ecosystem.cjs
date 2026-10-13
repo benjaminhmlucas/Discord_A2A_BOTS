@@ -10,7 +10,7 @@ test('installed logrotate and its audited lock share the pinned PM2 override pol
   const lock = require('../dependencies/logrotate/package-lock.json');
   assert.deepEqual(rotate.overrides, pm2.overrides);
   assert.deepEqual(rotate.dependencies, {'pm2-logrotate': '3.0.0'});
-  assert.equal(lock.packages['node_modules/pm2'].version, '7.0.1');
+  assert.equal(lock.packages['node_modules/pm2'].version, '7.0.4');
 });
 
 test('ecosystem uses only this checkout and bounded restart policies', () => {
