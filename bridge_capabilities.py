@@ -5,6 +5,8 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from collections.abc import Callable
+from typing import Any
 
 import aiohttp
 from yarl import URL
@@ -18,7 +20,7 @@ ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
 KINDS = {"string": str, "integer": int, "boolean": bool}
 
 
-def require(condition):
+def require(condition: object) -> None:
     if not condition:
         raise ValueError("Invalid capabilities configuration")
 
@@ -26,11 +28,11 @@ def require(condition):
 @dataclass(frozen=True)
 class CapabilityRequest:
     name: str
-    arguments: dict
+    arguments: dict[str, Any]
 
 
 class Capabilities:
-    def __init__(self, config, log):
+    def __init__(self, config: dict[str, Any], log: Callable[[str], None]) -> None:
         data = config.get("capabilities", {"enabled": False})
         require(isinstance(data, dict) and type(data.get("enabled")) is bool)
         require(set(data) <= {"enabled", "web", "tools", "search", "internal_origins"})
@@ -51,7 +53,7 @@ class Capabilities:
             except (ValueError, UnicodeError):
                 raise ValueError("Invalid capabilities configuration") from None
         self.http = SafeHTTP(internal_origins=internal)
-        self.tools = data.get("tools", {})
+        self.tools: dict[str, dict[str, Any]] = data.get("tools", {})
         require(isinstance(self.tools, dict) and len(self.tools) <= 32)
         for alias, tool in self.tools.items():
             require(isinstance(alias, str) and NAME.fullmatch(alias) and alias != "web")
@@ -112,10 +114,10 @@ class Capabilities:
                 and self.tools[self.search]["parameters"] == {"query": "string"}
             )
         )
-        self.secrets = set()
+        self.secrets: set[str] = set()
         self.refresh_secrets()
 
-    def refresh_secrets(self):
+    def refresh_secrets(self) -> None:
         for tool in self.tools.values():
             name = tool["credential_env"]
             if name:
@@ -123,19 +125,19 @@ class Capabilities:
                 if value:
                     self.secrets.add(value)
 
-    def redact(self, text):
+    def redact(self, text: str) -> str:
         for secret in sorted(self.secrets, key=len, reverse=True):
             text = text.replace(secret, "[REDACTED CREDENTIAL]")
         return text
 
-    def authorize(self, text, message, bot_id):
+    def authorize(self, text: str, message: Any, bot_id: int) -> CapabilityRequest | None:
         try:
             return self.request(text, message, bot_id)
         except CapabilityError:
             self.log("Capability command authorization=denied outcome=not_dispatched")
             raise
 
-    def request(self, text, message, bot_id):
+    def request(self, text: str, message: Any, bot_id: int) -> CapabilityRequest | None:
         command = re.match(r"^/(web|search|mcp)(?:\s|$)", text, re.I)
         if not command:
             return None
@@ -180,7 +182,7 @@ class Capabilities:
         self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
         return request
 
-    async def execute(self, request, privacy):
+    async def execute(self, request: CapabilityRequest, privacy: Any) -> str:
         # Only the authenticated message selected this operation. Never parse a result as a command.
         outcome = "failed"
         try:

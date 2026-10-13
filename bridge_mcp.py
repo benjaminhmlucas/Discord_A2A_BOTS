@@ -4,10 +4,11 @@ import asyncio
 import json
 import re
 from contextlib import suppress
+from typing import Any, cast
 
 import aiohttp
 
-from bridge_http import CapabilityError
+from bridge_http import CapabilityError, SafeHTTP
 
 PROTOCOL = "2026-07-28"
 LEGACY_PROTOCOL = "2025-11-25"
@@ -18,7 +19,7 @@ META = {
 }
 
 
-def response_result(value, identity):
+def response_result(value: object, identity: int) -> dict[str, Any] | None:
     if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
         raise CapabilityError("Invalid MCP response")
     if "method" in value:
@@ -32,18 +33,27 @@ def response_result(value, identity):
         or not isinstance(value.get("result"), dict)
     ):
         raise CapabilityError("MCP request failed")
-    return value["result"]
+    return cast(dict[str, Any], value["result"])
 
 
 class MCPClient:
-    def __init__(self, http, destination, authorization=None, *, protocol=PROTOCOL, secrets=None):
+    def __init__(
+        self,
+        http: SafeHTTP,
+        destination: str,
+        authorization: str | None = None,
+        *,
+        protocol: str = PROTOCOL,
+        secrets: set[str] | None = None,
+    ) -> None:
         self.http, self.destination, self.authorization = http, destination, authorization
         if protocol not in (PROTOCOL, LEGACY_PROTOCOL):
             raise CapabilityError("Unsupported MCP protocol")
-        self.protocol, self.session = protocol, None
+        self.protocol = protocol
+        self.session: str | None = None
         self.secrets = set() if secrets is None else secrets
 
-    def headers(self):
+    def headers(self) -> dict[str, str]:
         headers = {
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": self.protocol,
@@ -54,12 +64,14 @@ class MCPClient:
             headers["Mcp-Session-Id"] = self.session
         return headers
 
-    async def rpc(self, method, params, identity):
+    async def rpc(
+        self, method: str, params: dict[str, Any], identity: int | None
+    ) -> dict[str, Any]:
         headers = self.headers()
         headers["Mcp-Method"] = method
         if method == "tools/call":
             headers["Mcp-Name"] = params["name"]
-        body = {
+        body: dict[str, Any] = {
             "jsonrpc": "2.0",
             "method": method,
             "params": {**params, "_meta": META} if self.protocol == PROTOCOL else params,
@@ -111,7 +123,7 @@ class MCPClient:
             except (json.JSONDecodeError, RecursionError):
                 raise CapabilityError("Invalid MCP response") from None
 
-    async def call(self, name, arguments):
+    async def call(self, name: str, arguments: dict[str, Any]) -> str:
         try:
             if self.protocol == LEGACY_PROTOCOL:
                 result = await self.rpc(
@@ -138,7 +150,7 @@ class MCPClient:
                             pass
                 self.session = None
 
-    async def tool_call(self, name, arguments):
+    async def tool_call(self, name: str, arguments: dict[str, Any]) -> str:
         # Descriptions, annotations and server instructions cannot add tools or permissions.
         cursor, definition = None, None
         for page in range(3):

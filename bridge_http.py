@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import socket
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Mapping, Sequence
 
 import aiohttp
 from yarl import URL
@@ -13,14 +14,14 @@ class CapabilityError(ValueError):
     """Static messages only: request data, credentials and server errors stay private."""
 
 
-def public_address(value):
+def public_address(value: str) -> bool:
     address = ipaddress.ip_address(value)
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
         address = address.ipv4_mapped
     return address.is_global and not address.is_multicast
 
 
-def checked_url(value, internal_origins=()):
+def checked_url(value: object, internal_origins: Sequence[str] = ()) -> URL:
     if not isinstance(value, str) or len(value) > 2048 or any(ord(c) <= 32 for c in value):
         raise CapabilityError("Invalid destination")
     try:
@@ -49,11 +50,13 @@ def checked_url(value, internal_origins=()):
 
 
 class GuardedResolver(aiohttp.abc.AbstractResolver):
-    def __init__(self, internal=False):
+    def __init__(self, internal: bool = False) -> None:
         self.internal = internal
         self.delegate = aiohttp.resolver.ThreadedResolver()
 
-    async def resolve(self, host, port=0, family=socket.AF_INET):
+    async def resolve(
+        self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET
+    ) -> list[aiohttp.abc.ResolveResult]:
         answers = await self.delegate.resolve(host, port, family)
         if not answers or (
             not self.internal and any(not public_address(answer["host"]) for answer in answers)
@@ -61,17 +64,31 @@ class GuardedResolver(aiohttp.abc.AbstractResolver):
             raise CapabilityError("Destination denied")
         return answers
 
-    async def close(self):
+    async def close(self) -> None:
         await self.delegate.close()
 
 
 class SafeHTTP:
-    def __init__(self, *, internal_origins=(), max_bytes=65536, seconds=15, redirects=3):
+    def __init__(
+        self,
+        *,
+        internal_origins: Sequence[str] = (),
+        max_bytes: int = 65536,
+        seconds: float = 15,
+        redirects: int = 3,
+    ) -> None:
         self.internal_origins = tuple(internal_origins)
         self.max_bytes, self.seconds, self.redirects = max_bytes, seconds, redirects
 
     @asynccontextmanager
-    async def open(self, method, destination, *, headers=None, body=None):
+    async def open(
+        self,
+        method: str,
+        destination: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        body: object = None,
+    ) -> AsyncIterator[aiohttp.ClientResponse]:
         url = checked_url(destination, self.internal_origins)
         resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
         connector = aiohttp.TCPConnector(resolver=resolver, use_dns_cache=False, force_close=True)
@@ -101,7 +118,7 @@ class SafeHTTP:
         finally:
             await resolver.close()
 
-    async def read(self, response):
+    async def read(self, response: aiohttp.ClientResponse) -> str:
         data = bytearray()
         async for chunk in response.content.iter_chunked(4096):
             data.extend(chunk)
@@ -112,7 +129,7 @@ class SafeHTTP:
         except UnicodeError:
             raise CapabilityError("Invalid response encoding") from None
 
-    async def page(self, destination):
+    async def page(self, destination: str) -> str:
         # One deadline covers DNS, all redirect hops and the final body.
         async with asyncio.timeout(self.seconds):
             hop = 0
