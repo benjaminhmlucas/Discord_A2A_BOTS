@@ -90,6 +90,8 @@ protocol/method/name headers and client `_meta`. **MCP 2025-11-25 Streamable HTT
 uses initialize/initialized and an optional server session ID, followed by best-effort
 bounded DELETE cleanup. Session IDs are treated as sensitive and redacted alongside
 bearer credentials. Both accept bounded JSON or request-scoped SSE responses and
+retain sensitive session state only for the active bridge request, rather than building
+an unbounded history of session identifiers. Both
 support paginated `tools/list` and text `tools/call`
 results. It does not import server instructions, roots, sampling, elicitation, provider
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text

@@ -493,6 +493,7 @@ class Bridge:
                     self.state.release_request(reservation)
             finally:
                 if acquired:
+                    self.capabilities.active_secrets.clear()
                     self.lock.release()
                 self.pending -= 1
                 self.health["active_message_id"] = (

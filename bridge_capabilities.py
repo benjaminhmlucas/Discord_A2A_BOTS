@@ -115,9 +115,11 @@ class Capabilities:
             )
         )
         self.secrets: set[str] = set()
+        self.active_secrets: set[str] = set()
         self.refresh_secrets()
 
     def refresh_secrets(self) -> None:
+        self.secrets.clear()
         for tool in self.tools.values():
             name = tool["credential_env"]
             if name:
@@ -126,7 +128,7 @@ class Capabilities:
                     self.secrets.add(value)
 
     def redact(self, text: str) -> str:
-        for secret in sorted(self.secrets, key=len, reverse=True):
+        for secret in sorted(self.secrets | self.active_secrets, key=len, reverse=True):
             text = text.replace(secret, "[REDACTED CREDENTIAL]")
         return text
 
@@ -186,6 +188,7 @@ class Capabilities:
         # Only the authenticated message selected this operation. Never parse a result as a command.
         outcome = "failed"
         try:
+            self.active_secrets.clear()
             self.refresh_secrets()
             values = request.arguments
             if request.name != "web":
@@ -206,7 +209,7 @@ class Capabilities:
                     if tool["credential_env"] and not credential:
                         raise CapabilityError("MCP credential unavailable")
                     if credential:
-                        self.secrets.add(credential)
+                        self.active_secrets.add(credential)
                         if any(ord(c) < 33 or ord(c) > 126 for c in credential):
                             raise CapabilityError("Invalid MCP credential")
                     text = await MCPClient(
@@ -214,7 +217,7 @@ class Capabilities:
                         tool["endpoint"],
                         credential,
                         protocol=tool["protocol"],
-                        secrets=self.secrets,
+                        secrets=self.active_secrets,
                     ).call(tool["name"], values)
             text = await asyncio.to_thread(privacy.filter, self.redact(text))
             outcome = "completed"
