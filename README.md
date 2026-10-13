@@ -87,15 +87,31 @@ Run `scripts/start.ps1`. Startup invokes Node directly with the configured local
 & .\scripts\pm2.ps1 save
 ```
 
-Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.1 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
+Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.4 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
 
 The preloader rejects other PM2 versions and installs logrotate from its committed integrity lock using npm ci with lifecycle scripts disabled. This also pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
 
-PM2 7.0.1 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
+PM2 7.0.4 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
 
 The ecosystem contains all three launchers; a disabled identity exits with code 75 and is excluded from discussions and health checks. To change participation, edit `enabled_bots` to a subset of your configured numeric bot IDs and restart the affected processes. Keep all three identity mappings configured.
 
 Supervised Windows services use the venv's `pythonw.exe` to run without console windows. PM2 still captures stdout and stderr in its log files. Use `python.exe` for setup, diagnostics, and tests that need console output; do not replace all Python invocations with `pythonw.exe`.
+
+Provider subprocesses, timeout cleanup and PM2 module installers suppress new console windows by default. Management helpers keep an attached terminal; when launched without a console, they suppress new windows. Output still reaches the inherited streams and PM2 log files.
+
+For troubleshooting, set the following in the PowerShell terminal used to run any setup, management or foreground bot script:
+
+```powershell
+$env:BOTBRIDGE_SHOW_CONSOLE = '1'
+& .\scripts\pm2.ps1 list
+& .\scripts\pm2.ps1 logs --lines 30 --nostream
+```
+
+Only the exact value `1` enables consoles. It applies to Python helpers, provider-local Node child processes, PM2 installers, and all five services when their ecosystem configuration is next loaded. In this mode services use `python.exe` and `windowsHide: false`; already-running services are not changed by setting the variable. Use a separate installation or stop the matching supervised service before running a bot in the foreground, to avoid duplicate Discord connections. PM2 still captures service output in logs, and provider output retains its existing privacy boundaries. This switch controls console creation, not logging verbosity.
+
+Return to the background default with `Remove-Item Env:BOTBRIDGE_SHOW_CONSOLE`. If you started services in troubleshooting mode, reload their normal ecosystem configuration before saving the production roster. Recovery validates the saved console policy against the current ecosystem; a hidden recovery task rejects a saved troubleshooting roster. Do not persist troubleshooting mode in the global user environment or scheduled recovery task.
+
+Native Windows tests check Python helpers and all seven Node launch APIs for hidden consoles and preserved output. The preload cannot control commands launched directly by native `codex.exe` during `/work`, or programs that explicitly allocate their own windows. `/work` remains disabled by default; test native tool-window behavior separately before enabling it.
 
 8. Register independent Windows recovery after saving and verifying the roster:
 
@@ -130,7 +146,7 @@ Public chat providers cannot browse GitHub or retrieve links. Supply the relevan
 & .\.venv\Scripts\python.exe -m coverage json
 & .\.venv\Scripts\python.exe -m coverage report
 & .\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
-node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=ecosystem.config.js --test-coverage-include=scripts/pm2_namespace.cjs --test-coverage-include=scripts/pm2_recovery.cjs --test-coverage-include=scripts/recover_pm2.cjs tests/test_ecosystem.cjs tests/test_pm2_namespace.cjs tests/test_pm2_recovery.cjs
+node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=ecosystem.config.js --test-coverage-include=scripts/pm2_namespace.cjs --test-coverage-include=scripts/pm2_recovery.cjs --test-coverage-include=scripts/recover_pm2.cjs --test-coverage-include=scripts/hidden_windows.cjs tests/test_ecosystem.cjs tests/test_pm2_namespace.cjs tests/test_pm2_recovery.cjs tests/test_hidden_windows.cjs
 ```
 
 Both unit tests and setup integration tests are required. Coverage must be exactly 100% of statements and branch outcomes in every shipped Python module, with no coverage exclusions. JavaScript production configuration must also pass 100% line, branch and function coverage. See [testing procedures](docs/TESTING.md) for the native Windows installation, PowerShell, process-protection and 1 GB log-budget checks.

@@ -11,7 +11,7 @@ test('managed PM2 client opts into metadata RPC without changing normal monitori
   try {
     for (const directory of ['pm2/lib', 'unrelated/lib', 'pm2/Other']) {
       fs.mkdirSync(path.join(root, directory), {recursive:true});
-      fs.writeFileSync(path.resolve(root, directory, '../package.json'), JSON.stringify({name:'pm2',version:'7.0.1'}));
+      fs.writeFileSync(path.resolve(root, directory, '../package.json'), JSON.stringify({name:'pm2',version:'7.0.4'}));
       const entry = path.join(root, directory, 'Client.js');
       fs.writeFileSync(entry, 'module.exports = class Client { executeRemote(method, env, cb) { cb(null, {method, env, owner:this}); } };');
       const Client = require(entry);
@@ -43,7 +43,7 @@ test('recovery metadata RPC skips WMI while normal metrics and unrelated modules
     for (const directory of ['pm2/lib/God', 'unrelated/lib/God', 'pm2/lib/Other']) {
       fs.mkdirSync(path.join(root, directory), {recursive: true});
       const packageRoot = path.resolve(root, directory, '../..');
-      fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({name: 'pm2', version: '7.0.1'}));
+      fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({name: 'pm2', version: '7.0.4'}));
       const entry = path.join(root, directory, 'ActionMethods.js');
       fs.writeFileSync(entry, 'module.exports = God => {God.getMonitorData = (env, cb) => {God.metricCalls++; cb(null, "metrics");};};');
       const rows = [{name: 'synthetic', pid: 42, pm2_env: {status: 'online'}}];
@@ -69,7 +69,7 @@ test('PM2 paths are distinct per home, including nested PM2 module copies', () =
     for (const name of modules) {
       const directory = path.join(root, name);
       fs.mkdirSync(directory, { recursive: true });
-      fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({name:'pm2',version:'7.0.1'}));
+      fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({name:'pm2',version:'7.0.4'}));
       fs.writeFileSync(path.join(directory, 'paths.js'), 'module.exports = home => ({PM2_HOME:home,DAEMON_RPC_PORT:"global",DAEMON_PUB_PORT:"global",INTERACTOR_RPC_PORT:"global"});');
     }
     const first = require(path.join(root, 'pm2/paths.js'))(root);
@@ -96,7 +96,7 @@ test('only PM2 module npm installation bypasses the shell', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(),'npm-adapter-'));
   const packageRoot = path.join(root,'pm2');
   fs.mkdirSync(packageRoot);
-  fs.writeFileSync(path.join(packageRoot,'package.json'),JSON.stringify({name:'pm2',version:'7.0.1'}));
+  fs.writeFileSync(path.join(packageRoot,'package.json'),JSON.stringify({name:'pm2',version:'7.0.4'}));
   child.spawn = (...args) => { calls.push(args); return 'synthetic-spawn'; };
   try {
     const parent = { filename: path.join(packageRoot, 'lib/API/Modules/NPM.js') };
@@ -106,8 +106,10 @@ test('only PM2 module npm installation bypasses the shell', () => {
     assert.equal(path.basename(calls[0][1][0]), 'npm-cli.js');
     assert.equal(calls[0][1].at(-1), 'synthetic space & path');
     assert.equal(calls[0][2].shell, false);
+    assert.equal(calls[0][2].windowsHide, true);
     scoped.spawn('bun', ['install'], { shell: false });
     assert.equal(calls[1][0], 'bun');
+    assert.equal(calls[1][2].windowsHide, true);
     assert.equal(Module._load('child_process', null, false), child);
     const savedHome = process.env.PM2_HOME;
     process.env.PM2_HOME = root;
@@ -123,12 +125,28 @@ test('only PM2 module npm installation bypasses the shell', () => {
           ['install','pm2-logrotate@3.0.0',flag,destination],{shell:true});
         const policy=JSON.parse(fs.readFileSync(path.join(destination,'package.json')));
         assert.equal(policy.dependencies['pm2-logrotate'],'3.0.0');
-        assert.equal(policy.overrides.pm2,'7.0.1');
+        assert.equal(policy.overrides.pm2,'7.0.4');
         assert.deepEqual(JSON.parse(fs.readFileSync(path.join(destination,'package-lock.json'))), require('../dependencies/logrotate/package-lock.json'));
         assert.equal(calls.at(-1)[1][1],'ci');
         assert.ok(calls.at(-1)[1].includes('--ignore-scripts'));
         assert.equal(calls.at(-1)[0],process.execPath);
         assert.equal(calls.at(-1)[2].shell,false);
+        assert.equal(calls.at(-1)[2].windowsHide,true);
+      }
+      const priorConsole = process.env.BOTBRIDGE_SHOW_CONSOLE;
+      try {
+        for (const show of ['0','1']) {
+          process.env.BOTBRIDGE_SHOW_CONSOLE = show;
+          for (const [command,args] of [ ['npm.cmd',['version']], ['bun',['version']],
+            ['npm.cmd',['install','pm2-logrotate@3.0.0','--prefix',destination]] ]) {
+            scoped.spawn(command,args,{stdio:'inherit'});
+            assert.equal(calls.at(-1)[2].windowsHide,show !== '1');
+            assert.equal(calls.at(-1)[2].stdio,'inherit');
+          }
+        }
+      } finally {
+        if (priorConsole === undefined) delete process.env.BOTBRIDGE_SHOW_CONSOLE;
+        else process.env.BOTBRIDGE_SHOW_CONSOLE = priorConsole;
       }
       delete process.env.PM2_HOME;
       assert.throws(()=>scoped.spawn('npm.cmd',['install','pm2-logrotate@3.0.0'],{}),/scoped PM2_HOME/);
@@ -155,11 +173,11 @@ test('incompatible PM2 packages and paths fail before using any sockets', () => 
     delete require.cache[entry];
   }
   try {
-    for(const value of [{name:'other',version:'7.0.1'},{name:'pm2',version:'99.0.0'}]) {
+    for(const value of [{name:'other',version:'7.0.4'},{name:'pm2',version:'99.0.0'}]) {
       set(value);
       assert.throws(()=>require(entry),/Unsupported PM2 package/);
     }
-    const valid={name:'pm2',version:'7.0.1'};
+    const valid={name:'pm2',version:'7.0.4'};
     set(valid,'module.exports = {};');
     assert.throws(()=>require(entry),/Unsupported PM2 paths module/);
     for(const value of [null,{PM2_HOME:7},{PM2_HOME:''},{PM2_HOME:root},
