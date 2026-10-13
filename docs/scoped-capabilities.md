@@ -73,7 +73,7 @@ arguments before granting it access. Remote `readOnlyHint` annotations confer no
 
 Public destinations require HTTPS and globally routable unicast addresses. DNS answers
 are checked and the connector uses those same addresses, with no DNS cache, proxy or
-cookies. A mixed public/private DNS answer fails closed. Each web redirect is rechecked;
+cookies. A mixed public/private DNS answer fails closed. Each web redirect is rechecked.
 The public policy also conservatively blocks IPv6 translation/tunnel ranges, deprecated
 site-local addresses and the IETF special-purpose block `2001::/23`. It handles
 `192.0.0.0/24` explicitly (except its two public anycasts) because the supported Python
@@ -94,10 +94,8 @@ protocol/method/name headers and client `_meta`. **MCP 2025-11-25 Streamable HTT
 uses initialize/initialized and an optional server session ID, followed by best-effort
 bounded DELETE cleanup. Session IDs are treated as sensitive and redacted alongside
 bearer credentials. Both accept bounded JSON or request-scoped SSE responses and
-retain sensitive session state only for the active bridge request, rather than building
-an unbounded history of session identifiers. Both
-support paginated `tools/list` and text `tools/call`
-results. It does not import server instructions, roots, sampling, elicitation, provider
+support paginated `tools/list` and text `tools/call` results. Sensitive session state lasts
+only for the active bridge request. The client does not import server instructions, roots, sampling, elicitation, provider
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text
 results and schemas requiring `x-mcp-header` mirroring fail closed. There are no
 subscriptions, reconnections or persisted sessions. Other protocol revisions, legacy
