@@ -34,6 +34,12 @@ def test_malformed_url(value):
         "https://10.1.1.1",
         "https://100.64.0.1",
         "https://224.0.0.1",
+        "https://192.0.0.8",
+        "https://[64:ff9b::a00:1]",
+        "https://[64:ff9b:1::a00:1]",
+        "https://[2002:0a00:0001::]",
+        "https://[2001:1::1]",
+        "https://[fec0::1]",
     ],
 )
 def test_blocked_url(value):
@@ -43,6 +49,8 @@ def test_blocked_url(value):
 
 def test_addresses_and_explicit_internal_origin():
     assert public_address("8.8.8.8")
+    assert public_address("192.0.0.9")
+    assert public_address("192.0.0.10")
     assert public_address("2606:4700:4700::1111")
     assert not public_address("224.0.0.1")
     assert str(checked_url("https://example.com/a?q=x")) == "https://example.com/a?q=x"

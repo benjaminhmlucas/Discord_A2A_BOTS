@@ -74,6 +74,10 @@ arguments before granting it access. Remote `readOnlyHint` annotations confer no
 Public destinations require HTTPS and globally routable unicast addresses. DNS answers
 are checked and the connector uses those same addresses, with no DNS cache, proxy or
 cookies. A mixed public/private DNS answer fails closed. Each web redirect is rechecked;
+The public policy also conservatively blocks IPv6 translation/tunnel ranges, deprecated
+site-local addresses and the IETF special-purpose block `2001::/23`. It handles
+`192.0.0.0/24` explicitly (except its two public anycasts) because the supported Python
+3.11 runtime predates [classification fixes](https://docs.python.org/3/library/ipaddress.html#ipaddress.IPv4Address.is_global).
 MCP redirects are refused so bearer credentials cannot follow them. An internal server
 needs a separate explicit entry in `internal_origins`, such as
 `https://mcp.internal.example:8443`, with no path, query, credentials or wildcard.

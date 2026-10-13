@@ -9,6 +9,18 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 import aiohttp
 from yarl import URL
 
+V6_SPECIAL = tuple(
+    ipaddress.IPv6Network(value)
+    for value in (
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "2001::/23",
+        "2002::/16",
+    )
+)
+V4_SPECIAL = ipaddress.IPv4Network("192.0.0.0/24")
+V4_ANYCAST = {ipaddress.IPv4Address("192.0.0.9"), ipaddress.IPv4Address("192.0.0.10")}
+
 
 class CapabilityError(ValueError):
     """Static messages only: request data, credentials and server errors stay private."""
@@ -16,8 +28,18 @@ class CapabilityError(ValueError):
 
 def public_address(value: str) -> bool:
     address = ipaddress.ip_address(value)
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped:
+            address = address.ipv4_mapped
+        elif address.is_site_local or any(address in network for network in V6_SPECIAL):
+            return False
+    # Python 3.11 predates several non-global classifications fixed in 3.13.
+    if (
+        isinstance(address, ipaddress.IPv4Address)
+        and address in V4_SPECIAL
+        and address not in V4_ANYCAST
+    ):
+        return False
     return address.is_global and not address.is_multicast
 
 
