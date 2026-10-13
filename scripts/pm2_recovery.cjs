@@ -24,8 +24,11 @@ function validateDump(root, apps) {
     if (path.resolve(row.pm_exec_path) !== path.resolve(app.script) ||
         path.resolve(row.pm_cwd) !== path.resolve(app.cwd) ||
         path.resolve(row.PM2_HOME) !== path.join(root, '.pm2') ||
-        row.windowsHide !== true)
+        typeof app.windowsHide !== 'boolean' || row.windowsHide !== app.windowsHide)
       throw new Error('Saved process paths or hidden-window policy do not match ecosystem');
+    if (row.BOTBRIDGE_SHOW_CONSOLE !== app.env.BOTBRIDGE_SHOW_CONSOLE ||
+        row.env?.BOTBRIDGE_SHOW_CONSOLE !== app.env.BOTBRIDGE_SHOW_CONSOLE)
+      throw new Error('Saved console environment does not match ecosystem');
     // PM2 serializes a string of arguments as an array. These ecosystem arguments
     // deliberately contain no shell quoting; compare tokens and preserve their order.
     const args = value => Array.isArray(value) ? value : String(value).split(/\s+/);

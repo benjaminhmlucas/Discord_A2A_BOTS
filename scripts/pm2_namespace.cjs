@@ -1,13 +1,13 @@
 // Scope every PM2 copy (including module dependencies) to this PM2_HOME on Windows.
-// PM2 7.0.1 otherwise replaces home-relative sockets with fixed global named pipes.
+// PM2 7.0.4 otherwise replaces home-relative sockets with fixed global named pipes.
 const Module = require('node:module');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 function validate(root) {
   const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  if (metadata.name !== 'pm2' || metadata.version !== '7.0.1')
-    throw new Error('Unsupported PM2 package; this namespace adapter requires pm2@7.0.1');
+  if (metadata.name !== 'pm2' || metadata.version !== '7.0.4')
+    throw new Error('Unsupported PM2 package; this namespace adapter requires pm2@7.0.4');
 }
 const load = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -16,6 +16,7 @@ Module._load = function (request, parent, isMain) {
     validate(path.resolve(path.dirname(parent.filename), '../../..'));
     // PM2's npm.cmd shell invocation loses quoting for spaces and ampersands.
     return { ...value, spawn(command, args, options) {
+      const windowsHide = process.env.BOTBRIDGE_SHOW_CONSOLE !== '1';
       const npm = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
       if (args.includes('pm2-logrotate@3.0.0')) {
         if (!process.env.PM2_HOME) throw new Error('A scoped PM2_HOME is required');
@@ -30,10 +31,10 @@ Module._load = function (request, parent, isMain) {
         fs.copyFileSync(path.join(locked, 'package-lock.json'), path.join(expected, 'package-lock.json'));
         return value.spawn(process.execPath,
           [npm, 'ci', '--ignore-scripts', '--prefix', expected, '--loglevel=error'],
-          { ...options, shell: false });
+          { ...options, shell: false, windowsHide });
       }
-      if (command !== 'npm.cmd') return value.spawn(command, args, options);
-      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false });
+      if (command !== 'npm.cmd') return value.spawn(command, args, { ...options, windowsHide });
+      return value.spawn(process.execPath, [npm, ...args], { ...options, shell: false, windowsHide });
     } };
   }
   const file = Module._resolveFilename(request, parent, isMain);
