@@ -7,6 +7,7 @@
 - `/work` is disabled by default. When deliberately enabled, only the configured numeric owner can authorize it, only CodexBot runs it, and delivery must work privately before the provider runs. Display names, quoted text and other bots do not authorize local work.
 - Public provider calls disable local tools. Codex uses a read-only sandbox with tools and inherited configuration disabled; Claude disables tools, inherited settings, MCP, skills, Chrome and session persistence. Gemini receives curated input without local execution capability.
 - Bot-to-bot handoffs require a live SQLite transaction, expected sender and recipient, one-use token, matching channel, bounded turn count and expiry. Merely copying visible marker syntax does not authorize a handoff.
+- Untrusted PR, document, web and tool text cannot grant public capabilities; numeric transport metadata and explicit configuration determine work access. See [prompt-injection boundaries and AC evidence](docs/prompt-injection.md) for the deterministic checks and their limits.
 - Input and public output redact literal private-marker values and some credential formats. Private markers use `<!--PRIVATE:START-->` and `<!--PRIVATE:END-->` in local Markdown files.
 - Request queues, deadlines, provider retries and reply sizes are bounded. PM2 log rotation and aggregate cleanup manage log growth.
 

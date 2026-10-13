@@ -8,7 +8,11 @@ Install `requirements-dev.txt` into a development venv and run the commands unde
 
 `.coveragerc` measures every production Python module, including launchers and scripts. It excludes test code and installed dependencies only. Its exclusion and partial-branch patterns are empty. The standard report requires 100%; `scripts/check_coverage.py` additionally rejects any missing statement, missing branch, exclusion or omitted production module using raw JSON counts. A rounded percentage cannot pass that gate.
 
-The Node command in README uses V8 coverage and requires 100% lines, branches and functions for `ecosystem.config.js`, `scripts/pm2_namespace.cjs`, `scripts/pm2_recovery.cjs` and `scripts/recover_pm2.cjs`. PowerShell wrappers contain no conditional control flow: setup decisions are in the fully measured Python module and recovery decisions in the fully measured Node module. `tests/verify_wrappers.ps1` checks parsed syntax and observes setup/start statements in successful and failed installations. The recovery installer is executed against actual Windows Task Scheduler in the native PM2 test.
+The Node command in README uses V8 coverage and requires 100% lines, branches and functions for `ecosystem.config.js`, `scripts/pm2_namespace.cjs`, `scripts/pm2_recovery.cjs`, `scripts/recover_pm2.cjs` and `scripts/hidden_windows.cjs`. PowerShell wrappers contain no conditional control flow: setup decisions are in the fully measured Python module and recovery decisions in the fully measured Node module. `tests/verify_wrappers.ps1` checks parsed syntax and observes setup/start statements in successful and failed installations. The recovery installer is executed against actual Windows Task Scheduler in the native PM2 test.
+
+## Prompt-injection boundary tests
+
+`test_prompt_injection.py` uses actual authorization, SQLite transactions and private-marker files; only Discord transport and model output are substitutes. `test_ci_injection.py` runs the real policy checker on hostile YAML and through its real CLI, without executing candidate workflow commands. Fixtures cover PR metadata/diffs/docs, quoted approvals, web content and MCP/tool results as untrusted text. These checks do not certify a live provider's sandbox or detect every malicious natural-language instruction; see [the AC/evidence map and limits](prompt-injection.md).
 
 ## Windows integration
 

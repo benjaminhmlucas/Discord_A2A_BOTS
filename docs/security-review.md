@@ -12,11 +12,17 @@ dependency audits, and both CodeQL language jobs. Repository settings enforce th
 requirements; committing workflow YAML alone does not enable branch protection.
 Review and verify the active GitHub ruleset after changing job names or permissions.
 
+The Quality job runs the fail-closed `scripts/check_ci_policy.py` workflow checker.
+The [prompt-injection policy](prompt-injection.md) describes trusted authorization
+sources, adversarial AC evidence and why candidate-controlled CI still needs
+independent review. MCP/web and expanded memory capabilities remain disabled.
+
 CI uses SHA-pinned actions, read-only checkout credentials and no application
 secrets. Only the CodeQL job has permission to publish security findings. PR code
 never runs in a `pull_request_target` context. Tests use hosted runners and synthetic
 identities, never a production bot home. Dependencies and actions receive weekly
 Dependabot PRs; updates must pass the same checks and approval requirements.
+Action updates also need the matching `ACTION_PINS` entry in the policy checker.
 
 Ruff checks and formats shipped Python and tests. Mypy strictly checks the provider
 contract and atomic health I/O boundary; the remaining dynamically configured

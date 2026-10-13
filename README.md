@@ -142,6 +142,7 @@ Public chat providers cannot browse GitHub or retrieve links. Supply the relevan
 ```powershell
 & .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 & .\.venv\Scripts\python.exe scripts/check_release.py
+& .\.venv\Scripts\python.exe scripts/check_ci_policy.py
 & .\.venv\Scripts\python.exe -m coverage run -m pytest tests -q
 & .\.venv\Scripts\python.exe -m coverage json
 & .\.venv\Scripts\python.exe -m coverage report
@@ -162,7 +163,8 @@ list. Verify these repository settings; workflow files alone do not enforce them
 commits and runs formatting/lint, strict boundary type checks, Bandit, Python/npm
 audits, CodeQL, both supported OS suites and exact coverage gates. Dependabot proposes
 weekly dependency/action updates. See [the security review policy](docs/security-review.md)
-and [contribution checks](CONTRIBUTING.md).
+and [contribution checks](CONTRIBUTING.md). The [prompt-injection policy](docs/prompt-injection.md)
+maps ticket ACs to deterministic authorization and workflow checks, and states their limits.
 
 Persistent request limits default to six human requests per minute across bots,
 30 provider calls per bot per minute and 200 per bot per rolling day. Configure

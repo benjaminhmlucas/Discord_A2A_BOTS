@@ -20,6 +20,7 @@ from bridge_settings import config_path
 from bridge_privacy import Privacy
 from bridge_contracts import Provider, ProviderError
 from bridge_health_io import write_health
+from bridge_authorization import WorkDenied, authorize_work, eligible_sender
 from bridge_state import START, STRIP, State
 
 ROOT = Path(__file__).resolve().parent
@@ -248,18 +249,11 @@ class Bridge:
             raise
 
     async def _handle(self, message, deadline):
-        if (
-            message.channel.id != self.config["channel_id"]
-            or message.webhook_id
-            or message.author.id == self.bot_id
-            or self.bot_id not in self.config["enabled_bots"]
-        ):
+        if not eligible_sender(message, self.bot_id, self.config):
             return
         content = message.content or ""
         mentions = [int(m) for m in re.findall(r"<@!?(\d+)>", content)]
         if self.bot_id not in mentions:
-            return
-        if not message.author.bot and message.author.id not in self.config["allowed_user_ids"]:
             return
         session = None
         if message.author.bot:
@@ -268,27 +262,21 @@ class Bridge:
                 return  # No ad-hoc bot chains, parked-bot exceptions, or legacy markers.
         text = re.sub(r"<@!?\d+>", "", STRIP.sub("", content)).strip()
         start = START.fullmatch(text) if not message.author.bot else None
-        work = bool(re.match(r"^/work(?:\s|$)", text, re.I))
-        if work and (message.author.bot or message.author.id != self.config["owner_id"]):
-            await self.send(message.channel, "Bridge: only the owner can authorize /work.", message)
-            return
-        if work and self.bot_id != CODEX_APP_ID:
-            await self.send(
-                message.channel, "Bridge: use CodexBot for /work; this bot provides chat.", message
-            )
-            return
-        if work and not self.config.get("allow_work", False):
-            await self.send(
-                message.channel, "Bridge: local work is disabled in this installation.", message
-            )
-            return
         if start:
             first = next((i for i in mentions if i in self.config["enabled_bots"]), None)
             if first != self.bot_id:
                 return
+        # Deduplicate before any reply, so a replayed message (even a refused one) is silent.
         if self.state.seen(self.bot_id, message.id):
             if session:
                 self.state.fail(session[0])
+            return
+        try:
+            work = authorize_work(text, message, self.bot_id, CODEX_APP_ID, self.config)
+        except WorkDenied as denied:
+            if session:
+                self.state.fail(session[0])  # A handoff cannot leave its discussion busy.
+            await self.send(message.channel, str(denied), message)
             return
         if start:
             turns = max(1, min(int(start.group(1) or 3), self.config["max_turns"]))
