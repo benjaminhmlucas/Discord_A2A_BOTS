@@ -2,9 +2,9 @@
   "name": "botbridge-pm2-tools",
   "version": "1.0.0",
   "private": true,
-  "dependencies": { "pm2": "7.0.1" },
+  "dependencies": { "pm2": "7.0.4" },
   "overrides": {
-    "pm2": "7.0.1",
+    "pm2": "7.0.4",
     "basic-ftp": "6.2.2",
     "chokidar": "4.0.3",
     "js-yaml": "4.3.2",

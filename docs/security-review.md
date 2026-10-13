@@ -37,10 +37,14 @@ Management operations explicitly set `BOTBRIDGE_PM2_METADATA_ONLY=1` so process-
 lookup and operation summaries use metadata instead of blocking Windows WMI metrics.
 This requires the pinned Client.executeRemote adapter too. Direct PM2 monitoring
 without this opt-in retains normal CPU/memory collection.
-The adapter intentionally requires PM2 7.0.1. A dependency update that
+The adapter intentionally requires PM2 7.0.4. A dependency update that
 changes this version must update and retest the adapter and both npm manifests
 together. The production logrotate installer copies the committed manifest and integrity
 lock and runs npm ci with lifecycle scripts disabled; CI audits that same graph.
+For 7.0.4, the published module installer and God monitoring implementation are
+unchanged from 7.0.1; the Client and socket-path changes remove unused win64 checks.
+The actual Windows lifecycle test also disables the metadata flag and checks that
+ordinary process monitoring still returns numeric CPU and memory measurements.
 The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 
@@ -98,6 +102,6 @@ operators must inspect fresh recovery/health state and repair the cause. It does
 restart stopped services merely to make monitoring green.
 
 Recovery's metadata-only process-list RPC avoids Windows CPU/memory query delays.
-The adapter enables it only for an explicit boolean flag in pinned PM2 7.0.1;
+The adapter enables it only for an explicit boolean flag in pinned PM2 7.0.4;
 normal monitoring continues to collect metrics. The actual scheduled-task test
 verifies cold recovery, deliberately stopped service preservation and cleanup.

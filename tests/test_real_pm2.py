@@ -99,7 +99,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         shutil.copyfile(root / "dependencies/pm2/package-lock.json", prefix / "package-lock.json")
         command([native.NODE, npm, "ci", "--prefix", prefix, "--no-audit", "--no-fund"])
     module = prefix / "node_modules/pm2"
-    assert json.loads((module / "package.json").read_text())["version"] == "7.0.1"
+    assert json.loads((module / "package.json").read_text())["version"] == "7.0.4"
     cli = module / "bin/pm2"
     settings = json.loads((root / "local_settings.json").read_text())
     settings["node_executable"] = native.NODE
@@ -171,6 +171,16 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
             "pm2-logrotate",
         }
         assert processes(other) == []
+        # The opt-in adapter must not change ordinary monitoring after an upgrade.
+        monitoring = env.copy()
+        monitoring.pop("BOTBRIDGE_PM2_METADATA_ONLY")
+        monitored = processes(monitoring)
+        assert {row["name"] for row in monitored} == names
+        assert all(
+            isinstance(row["monit"][key], (int, float)) and row["monit"][key] >= 0
+            for row in monitored
+            for key in ("cpu", "memory")
+        )
         pm2(
             "multiset",
             "pm2-logrotate:max_size 32K pm2-logrotate:retain 2 pm2-logrotate:compress true pm2-logrotate:workerInterval 1",
@@ -194,7 +204,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         for archive in archives:
             assert b"SYNTHETIC-REAL-PM2-TEST" in gzip.decompress(archive.read_bytes())
         rows = {row["name"]: row for row in processes()}
-        # PM2 7.0.1 unconditionally applies the delay's display label even when
+        # PM2 7.0.4 unconditionally applies the delay's display label even when
         # stop_exit_codes prevents creating a restart task. Check actual behavior.
         assert rows["claudebot"]["pm2_env"]["status"] in ("stopped", "waiting restart")
         assert rows["claudebot"]["pid"] == 0
@@ -208,7 +218,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         assert rows["botbridge-log-manager"]["pm2_env"]["status"] == "online"
         assert json.loads((root / "log_management_state.json").read_text())["status"] == "ok"
         nested = root / ".pm2/modules/pm2-logrotate/node_modules/pm2/package.json"
-        assert json.loads(nested.read_text())["version"] == "7.0.1"
+        assert json.loads(nested.read_text())["version"] == "7.0.4"
         npm = str(Path(native.NODE).parent / "node_modules/npm/bin/npm-cli.js")
         for destination in (prefix, root / ".pm2/modules/pm2-logrotate"):
             audit = json.loads(
@@ -220,7 +230,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         pm2("install", "pm2-logrotate@3.0.0")
         command([python, root / "scripts/fix_logrotate.py"])
         pm2("restart", "pm2-logrotate")
-        assert json.loads(nested.read_text())["version"] == "7.0.1"
+        assert json.loads(nested.read_text())["version"] == "7.0.4"
         pm2("start", "codexbot")
         pm2("save")
         assert {
@@ -231,10 +241,11 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         assert {row["name"] for row in processes()} == names
         assert processes(other) == []
         receipt = {
-            "real_pm2_version": "7.0.1",
+            "real_pm2_version": "7.0.4",
             "installed_logrotate_version": "3.0.0",
             "isolated_daemons": 2,
             "distinct_rpc_sockets": True,
+            "normal_monitoring_preserved": True,
             "real_start_save_resurrect": True,
             "compressed_rotation_and_retention": True,
             "exit_103_no_restart": True,
