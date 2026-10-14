@@ -287,8 +287,7 @@ class Bridge:
             await self.send(message.channel, str(denied), message)
             return
         except CapabilityError:
-            if session:
-                self.state.fail(session[0])
+            # Only human commands reach capability denial; bot handoffs remain chat.
             await self.send(
                 message.channel,
                 "Bridge: capability request denied; check configuration and command arguments.",

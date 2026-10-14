@@ -27,7 +27,7 @@
     "bridge_mcp.py": "6a3611eb651bc97ce2d68a10d3fa287a477fffa1182b6952ff1dde39e44e6dfe",
     "bridge_privacy.py": "76e7728867b699d88da9d5742c36333cc97eae0198d0b1135259663e00d9cb4b",
     "bridge_providers.py": "1263d37ff70595d8c6d4be4cfee4c227a8f55d5009fa67484081d653e29b09cf",
-    "bridge_runtime.py": "1f09bb6ae4a4eb127b3a06216b92c31c83583446878449c952549c4a0c1f455f",
+    "bridge_runtime.py": "d49f4252d2a2cc30b4f48a41aa692ea7e84633e9668eec9fc18be308cfffe91e",
     "bridge_settings.py": "9c9ce27794a8d4e0bd476a14fd6a3795811b5b2f54b80ef35ac762116c1b80f8",
     "bridge_state.py": "ec40c752a2c620019e97d3811bd5ec02a622a670e113d5cb18bfd5cc3206046b",
     "bridge_windows.py": "96aa37bb9ef58fc1ab77d0f140633f415092cf6cff47e30511267a033b00decf",
