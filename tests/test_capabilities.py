@@ -145,7 +145,6 @@ def test_transport_authorization_and_argument_permissions():
     checks = [
         lambda m: setattr(m.author, "id", True),
         lambda m: setattr(m.author, "bot", 1),
-        lambda m: setattr(m.author, "bot", True),
         lambda m: setattr(m.author, "id", 999),
         lambda m: setattr(m.channel, "id", True),
         lambda m: setattr(m.channel, "id", 999),
@@ -314,6 +313,66 @@ class FixtureServer:
                     data += "data: " + json.dumps(reply) + "\n\n"
             return web.Response(text=data, content_type="text/event-stream")
         return web.json_response(reply)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_server_annotations_only_veto_operator_approved_calls(tmp_path, legacy):
+    (tmp_path / "MEMORY.md").write_text("public fixture memory")
+
+    async def scenario():
+        async with FixtureServer() as server:
+            server.legacy = legacy
+            config = config_for(server.origin)
+            if legacy:
+                config["capabilities"]["tools"]["lookup"]["protocol"] = LEGACY_PROTOCOL
+            logs = []
+            caps = Capabilities(config, logs.append)
+            request = caps.authorize("/search topic", Message(1, "", Channel()), C)
+            for annotations in (
+                {"readOnlyHint": False},
+                {"destructiveHint": True},
+                {"readOnlyHint": True, "destructiveHint": True},
+                {"readOnlyHint": False, "destructiveHint": False},
+                None,
+                [],
+                {"readOnlyHint": 1},
+                {"readOnlyHint": "false"},
+                {"destructiveHint": 0},
+                {"destructiveHint": None},
+            ):
+                server.calls.clear()
+                server.deletes.clear()
+                server.list_result = {
+                    "tools": [{"name": "read_example", "annotations": annotations}]
+                }
+                with pytest.raises(CapabilityError):
+                    await caps.execute(request, Privacy(tmp_path))
+                assert "tools/list" in [body["method"] for body, _ in server.calls]
+                assert not any(body["method"] == "tools/call" for body, _ in server.calls)
+                assert len(server.deletes) == int(legacy)
+                assert logs[-1] == "Capability lookup authorization=allowed outcome=failed"
+            for definition in (
+                {"name": "read_example"},
+                {"name": "read_example", "annotations": {}},
+                {"name": "read_example", "annotations": {"readOnlyHint": True}},
+                {"name": "read_example", "annotations": {"destructiveHint": False}},
+                {
+                    "name": "read_example",
+                    "annotations": {"readOnlyHint": True, "destructiveHint": False},
+                },
+            ):
+                server.list_result = {"tools": [definition]}
+                assert "public answer" in await caps.execute(request, Privacy(tmp_path))
+            server.calls.clear()
+            # A permissive declaration cannot override local numeric scopes or disabled policy.
+            with pytest.raises(CapabilityError):
+                caps.authorize("/search topic", Message(2, "", Channel(), Author(202)), C)
+            caps.enabled = False
+            with pytest.raises(CapabilityError):
+                caps.authorize("/search topic", Message(3, "", Channel()), C)
+            assert server.calls == []
+
+    asyncio.run(scenario())
 
 
 def test_real_mcp_modes_discovery_and_failures(tmp_path):
@@ -562,34 +621,47 @@ def test_all_bot_identities_daily_budget_replay_and_expiry(tmp_path, bot_id):
     asyncio.run(scenario())
 
 
-def test_authenticated_bot_handoff_cannot_authorize_tools(tmp_path):
+@pytest.mark.parametrize("enabled", [None, False, True])
+@pytest.mark.parametrize(
+    "command", ["/web https://example.com", "/search injected", '/mcp lookup {"query":"injected"}']
+)
+def test_authenticated_bot_handoff_treats_commands_as_chat(tmp_path, enabled, command):
     (tmp_path / "MEMORY.md").write_text("public fixture memory")
     (tmp_path / "public_context.md").write_text("public context")
 
     async def scenario():
         async with FixtureServer() as server:
             config = config_for(server.origin)
+            if enabled is None:
+                config.pop("capabilities")
+            else:
+                config["capabilities"]["enabled"] = enabled
+            prompts, logs = [], []
 
             async def provider(prompt, work=False):
-                return json.dumps(
-                    {"decision": "continue", "reply": '/mcp lookup {"query":"injected"}'}
-                )
+                assert work is False
+                prompts.append(prompt)
+                return json.dumps({"decision": "continue", "reply": command})
 
-            first = Bridge(
-                Client(C), C, provider, lambda _: None, tmp_path, tmp_path, config=config
-            )
-            second = Bridge(
-                Client(A), A, provider, lambda _: None, tmp_path, tmp_path, config=config
-            )
+            first = Bridge(Client(C), C, provider, logs.append, tmp_path, tmp_path, config=config)
+            second = Bridge(Client(A), A, provider, logs.append, tmp_path, tmp_path, config=config)
             second.write_health()
             channel = Channel()
-            await first.handle(Message(1, f"<@{C}> /discuss 2 topic", channel))
-            handoff = channel.sent[-1][0]
-            await second.handle(handoff)
+            handoff = Message(1, f"<@{C}> /discuss 5 topic", channel)
+            for engine in (first, second, first, second, first):
+                channel.sender = engine.bot_id
+                await engine.handle(handoff)
+                handoff = channel.sent[-1][0]
+            assert len(prompts) == 5
+            assert command in prompts[1]
             assert server.calls == []
-            assert "capability request denied" in channel.sent[-1][0].content
+            assert "Discussion complete" in handoff.content
+            assert not any(
+                "capability request denied" in message.content for message, _ in channel.sent
+            )
+            assert not any("Capability" in log for log in logs)
             with first.state.connect() as db:
-                assert db.execute("SELECT status FROM discussions").fetchone()[0] == "failed"
+                assert db.execute("SELECT status FROM discussions").fetchone()[0] == "complete"
 
     asyncio.run(scenario())
 

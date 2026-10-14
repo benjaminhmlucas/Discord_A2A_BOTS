@@ -169,6 +169,15 @@ class MCPClient:
                 raise CapabilityError("Configured MCP tool unavailable")
         if definition is None:
             raise CapabilityError("MCP discovery limit reached")
+        # Server hints may veto an operator-approved tool, never grant permissions.
+        annotations = definition.get("annotations", {})
+        if not isinstance(annotations, dict) or any(
+            key in annotations and type(annotations[key]) is not bool
+            for key in ("readOnlyHint", "destructiveHint")
+        ):
+            raise CapabilityError("Invalid MCP tool annotations")
+        if annotations.get("readOnlyHint") is False or annotations.get("destructiveHint") is True:
+            raise CapabilityError("MCP tool declares write or destructive behavior")
         # Header-mirroring schema extensions need a separate reviewed implementation.
         # Fail closed rather than sending arguments with incomplete protocol headers.
         if '"x-mcp-header"' in json.dumps(definition.get("inputSchema", {})):

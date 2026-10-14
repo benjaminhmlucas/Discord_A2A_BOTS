@@ -24,7 +24,10 @@ with a `query` string. `/mcp` selects a configured alias, never an arbitrary end
 tool name. Tool parameters are required scalar strings, integers or booleans; nested
 objects and arrays are unsupported. Fixed arguments cannot be overridden. A command
 inside `/discuss`, `/work`, a quote or a tool result does not invoke this dispatcher.
-Discussion continuations cannot invoke capabilities.
+Discussion continuations cannot invoke capabilities. A bot reply beginning with one
+of these commands remains ordinary discussion text, including with capabilities disabled.
+An explicit human capability command is denied when capabilities are disabled;
+it does not fall back to a model reply.
 
 ## Operator configuration
 
@@ -63,13 +66,17 @@ with `BOTBRIDGE_MCP_` and use uppercase ASCII; existing Discord/provider credent
 cannot be selected. Set the value in the bot process environment without committing it
 or posting it in Discord, then restart through the normal deployment process.
 
-All configured tools must be read-only. Mutating tools fail configuration validation,
-including when requested by the owner. This ticket provides no new file writes,
+All configured tools must have `read_only: true`; other values fail configuration
+validation, including when requested by the owner. This ticket provides no new file writes,
 memory access, shell execution or external write approvals. Existing owner-only private
 `/work` remains a separate explicitly enabled capability; expanded memory is issue #18.
 `read_only: true` is an operator assertion, not a sandbox for a malicious MCP server.
 Review the server implementation, credential scopes and fixed collection/resource
-arguments before granting it access. Remote `readOnlyHint` annotations confer no authority.
+arguments before granting it access. Remote annotations confer no authority to allow
+a call. An explicit `readOnlyHint: false` or `destructiveHint: true` in the discovered
+tool definition vetoes the call; malformed annotations or non-boolean values for these
+hints also fail closed. Missing hints preserve the operator-approved policy. These
+checks cannot prove that a server truthfully describes its behavior.
 
 Public destinations require HTTPS and globally routable unicast addresses. DNS answers
 are checked and the connector uses those same addresses, with no DNS cache, proxy or

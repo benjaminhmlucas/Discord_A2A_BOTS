@@ -143,7 +143,11 @@ class Capabilities:
         command = re.match(r"^/(web|search|mcp)(?:\s|$)", text, re.I)
         if not command:
             return None
-        # Repeat the transport checks at this boundary, including refusing all bot continuations.
+        # Bot continuations are ordinary chat, even when they suggest a capability command.
+        # The runtime independently authenticates discussion handoffs before reaching here.
+        if message.author.bot is True:
+            return None
+        # Repeat transport checks for human commands; malformed author flags fail closed.
         if not (
             self.enabled
             and type(bot_id) is int
