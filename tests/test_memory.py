@@ -449,3 +449,73 @@ def test_memory_files_fail_closed_through_actual_dispatch(tmp_path, kind):
             await caps.execute(request, Privacy(root))
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("kind", ["linked_directory", "denied_file"])
+def test_actual_link_and_permission_denial_prevent_memory_dispatch(tmp_path, kind):
+    root = tmp_path / "memory"
+    populate(root)
+    config = memory_config(root)
+    original = (root / "private.md").read_bytes()
+    target = root / "private.md"
+    linked = root / "linked"
+
+    def windows_run(arguments):
+        return subprocess.run(
+            arguments,
+            check=True,
+            capture_output=True,
+            timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+    user = os.environ.get("USERDOMAIN", "") + "\\" + os.environ.get("USERNAME", "")
+    icacls = str(Path(os.environ.get("SYSTEMROOT", "C:/Windows")) / "System32/icacls.exe")
+    if kind == "linked_directory":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "private.md"
+        target.write_bytes(original)
+        config["memory"]["files"]["private"]["path"] = "linked/private.md"
+        if os.name == "nt":
+
+            def quote(value):
+                return "'" + str(value).replace("'", "''") + "'"
+
+            windows_run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "New-Item -ItemType Junction -Path "
+                    + quote(linked)
+                    + " -Target "
+                    + quote(outside)
+                    + " | Out-Null",
+                ]
+            )
+        else:
+            linked.symlink_to(outside, target_is_directory=True)
+    elif os.name == "nt":
+        windows_run([icacls, str(target), "/deny", user + ":(RD)"])
+    else:
+        target.chmod(0)
+    try:
+        caps = Capabilities(config, lambda _: None)
+        request = caps.authorize("/memory read public", Message(1, "", Channel()), C)
+
+        async def scenario():
+            with pytest.raises((CapabilityError, PermissionError)):
+                await caps.execute(request, Privacy(root))
+
+        asyncio.run(scenario())
+    finally:
+        if kind == "linked_directory":
+            linked.rmdir() if os.name == "nt" else linked.unlink()
+        elif os.name == "nt":
+            windows_run([icacls, str(target), "/remove:d", user])
+        else:
+            target.chmod(0o600)
+    assert target.read_bytes() == original
+    assert not (root / CONTROL).exists()

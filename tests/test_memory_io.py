@@ -33,7 +33,7 @@ class PosixAdapter:
     def path(self, path, descriptor):
         return self.directories[descriptor] / path if descriptor is not None else Path(path)
 
-    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+    def open(self, path, flags, mode=0o600, *, dir_fd=None):
         target = self.path(path, dir_fd)
         if target.is_dir():
             self.counter += 1

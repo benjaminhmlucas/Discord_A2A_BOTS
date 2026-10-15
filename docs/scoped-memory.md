@@ -69,8 +69,9 @@ Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.
 
 Precreate the root, approved files and nested directories with restrictive owner-only
-filesystem permissions. Windows control files inherit those ACLs; POSIX control files
-use mode 0600 and the control directory 0700. Use a local disk, not UNC/network
+filesystem permissions. Windows control files inherit those ACLs; POSIX atomic and
+audit files use mode 0600, and the control directory uses 0700 to protect its SQLite
+lock file as well. Use a local disk, not UNC/network
 storage. Do not let untrusted accounts write this root. Keep the existing privacy
 source set to the same root. Paths and exact public/private/write policy need
 operator review and isolated acceptance before activation. Set `enabled: false`
