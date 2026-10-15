@@ -40,6 +40,9 @@ def test_malformed_url(value):
         "https://[2002:0a00:0001::]",
         "https://[2001:1::1]",
         "https://[fec0::1]",
+        "https://[::127.0.0.1]",
+        "https://[::169.254.169.254]",
+        "https://[4000::1]",
     ],
 )
 def test_blocked_url(value):
@@ -52,6 +55,8 @@ def test_addresses_and_explicit_internal_origin():
     assert public_address("192.0.0.9")
     assert public_address("192.0.0.10")
     assert public_address("2606:4700:4700::1111")
+    assert public_address("::ffff:8.8.8.8")
+    assert str(checked_url("https://[::ffff:8.8.8.8]/"))
     assert not public_address("224.0.0.1")
     assert str(checked_url("https://example.com/a?q=x")) == "https://example.com/a?q=x"
     assert str(checked_url("http://127.0.0.1:123/a", ("http://127.0.0.1:123",)))
@@ -72,6 +77,9 @@ def test_dns_answers_all_checked():
                 ([], False),
                 (["8.8.8.8"], True),
                 (["8.8.8.8", "127.0.0.1"], False),
+                (["::127.0.0.1"], False),
+                (["::169.254.169.254"], False),
+                (["8.8.8.8", "4000::1"], False),
             ]:
                 answers = [
                     (socket.AF_INET, socket.SOCK_STREAM, 6, "", (host, 443)) for host in hosts

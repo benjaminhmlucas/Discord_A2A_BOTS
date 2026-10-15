@@ -383,7 +383,7 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
         async with FixtureServer() as server:
             caps = Capabilities(config_for(server.origin, TOKEN_ENV), lambda _: None)
             client = MCPClient(caps.http, server.origin + "/mcp", CANARY)
-            for mode in ("json", "sse", "slow"):
+            for mode in ("json", "sse", "slow", "duplicate"):
                 server.mode = mode
                 assert await client.call("read_example", {"query": "topic"}) == "public answer"
             assert all(h["Authorization"] == "Bearer " + CANARY for _, h in server.calls)
@@ -393,7 +393,6 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
                 "broken",
                 "type",
                 "notification",
-                "duplicate",
                 "empty_sse",
                 "request_sse",
                 "broken_sse",

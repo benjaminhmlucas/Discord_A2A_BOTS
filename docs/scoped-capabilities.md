@@ -82,7 +82,9 @@ Public destinations require HTTPS and globally routable unicast addresses. DNS a
 are checked and the connector uses those same addresses, with no DNS cache, proxy or
 cookies. A mixed public/private DNS answer fails closed. Each web redirect is rechecked.
 The public policy also conservatively blocks IPv6 translation/tunnel ranges, deprecated
-site-local addresses and the IETF special-purpose block `2001::/23`. It handles
+site-local and reserved addresses (including deprecated IPv4-compatible IPv6) and
+the IETF special-purpose block `2001::/23`. IPv4-mapped IPv6 is classified using its
+embedded IPv4 address, so mapped public IPv4 remains permitted. It handles
 `192.0.0.0/24` explicitly (except its two public anycasts) because the supported Python
 3.11 runtime predates [classification fixes](https://docs.python.org/3/library/ipaddress.html#ipaddress.IPv4Address.is_global).
 MCP redirects are refused so bearer credentials cannot follow them. An internal server
@@ -101,7 +103,16 @@ protocol/method/name headers and client `_meta`. **MCP 2025-11-25 Streamable HTT
 uses initialize/initialized and an optional server session ID, followed by best-effort
 bounded DELETE cleanup. Session IDs are treated as sensitive and redacted alongside
 bearer credentials. Both accept bounded JSON or request-scoped SSE responses and
-support paginated `tools/list` and text `tools/call` results. Sensitive session state lasts
+support paginated `tools/list` and text `tools/call` results. SSE is parsed incrementally:
+empty priming events and comments are ignored, LF/CRLF/CR framing and split UTF-8
+are supported, and the first correlated final response completes the request without
+waiting for EOF. An unterminated event is not dispatched; bytes after the final response
+are not processed. Legacy request cancellation or timeout sends a best-effort
+`notifications/cancelled` carrying the active request ID, even without a session.
+Initialization is never cancelled. Modern HTTP cancellation closes the stream and
+sends no legacy notification. Request IDs are random safe JSON integers to avoid
+fixed-ID reuse across sessionless clients. A server can decline cancellation; this
+client signals it but cannot guarantee remote execution stops. Sensitive session state lasts
 only for the active bridge request. The client does not import server instructions, roots, sampling, elicitation, provider
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text
 results and schemas requiring `x-mcp-header` mirroring fail closed. There are no
@@ -130,8 +141,9 @@ reply uses that same reservation. Capability failure/cancellation after that poi
 charged. Cancellation or expiry while still queued gives the daily reservation back.
 Each operation has a 15-second total network deadline, a 64 KiB body limit per response,
 three web redirects or three MCP discovery pages, and at most one MCP tool call.
-Legacy initialization/notification and session termination add protocol-only requests;
-termination gets at most two additional seconds and does not mask a call failure. Bodies
+Legacy initialization/notification, cancellation signalling and session termination add
+protocol-only requests; cancellation and termination share at most two additional seconds,
+and cleanup does not mask a call failure. Bodies
 with compression are refused. Tool text supplied to providers is capped at 16000
 characters. Network I/O is asynchronous; privacy scans run off the event loop.
 
@@ -153,6 +165,10 @@ registry/identity scopes, injection in descriptions/results, private arguments w
 quotes/backslashes, synthetic credential redaction, all three identities, persistent
 quota charging, replay and queued expiry. External model inference is a controlled
 test sink, not a replacement for the authorization or transport being tested.
+`tests/test_mcp_streaming.py` adds held-open SSE streams, empty primers, chunked
+framing/UTF-8, bounded malformed and oversized events, and real cancellation notifications
+for active discovery/tool requests. It checks initialization exclusions, both protocol
+revisions, sessionless requests, timeouts and failed/hanging cleanup.
 
 These isolated checks do not establish acceptance of an operator's particular server,
 credential scope or live Discord delivery. Keep the feature disabled until required CI,

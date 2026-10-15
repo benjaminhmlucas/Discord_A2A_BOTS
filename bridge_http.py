@@ -2,6 +2,7 @@
 
 import asyncio
 import ipaddress
+import re
 import socket
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -40,7 +41,7 @@ def public_address(value: str) -> bool:
         and address not in V4_ANYCAST
     ):
         return False
-    return address.is_global and not address.is_multicast
+    return address.is_global and not address.is_multicast and not address.is_reserved
 
 
 def checked_url(value: object, internal_origins: Sequence[str] = ()) -> URL:
@@ -140,14 +141,39 @@ class SafeHTTP:
         finally:
             await resolver.close()
 
-    async def read(self, response: aiohttp.ClientResponse) -> str:
-        data = bytearray()
+    async def chunks(self, response: aiohttp.ClientResponse) -> AsyncIterator[bytes]:
+        size = 0
         async for chunk in response.content.iter_chunked(4096):
-            data.extend(chunk)
-            if len(data) > self.max_bytes:
+            size += len(chunk)
+            if size > self.max_bytes:
                 raise CapabilityError("Response too large")
+            yield chunk
+
+    async def read(self, response: aiohttp.ClientResponse) -> str:
+        data = b"".join([chunk async for chunk in self.chunks(response)])
         try:
             return data.decode("utf-8")
+        except UnicodeError:
+            raise CapabilityError("Invalid response encoding") from None
+
+    async def lines(self, response: aiohttp.ClientResponse) -> AsyncIterator[str]:
+        """Strict UTF-8 lines, including CRLF split across network chunks."""
+        buffer = b""
+        skip_lf = False
+        try:
+            async for chunk in self.chunks(response):
+                if skip_lf:
+                    if chunk.startswith(b"\n"):
+                        chunk = chunk[1:]
+                    skip_lf = False
+                buffer += chunk
+                while match := re.search(rb"\r\n|\r|\n", buffer):
+                    # CR terminates immediately; a following LF is the same delimiter.
+                    skip_lf = match.group() == b"\r" and match.end() == len(buffer)
+                    yield buffer[: match.start()].decode("utf-8")
+                    buffer = buffer[match.end() :]
+            # Validate but do not dispatch an unterminated SSE line.
+            buffer.decode("utf-8")
         except UnicodeError:
             raise CapabilityError("Invalid response encoding") from None
 
