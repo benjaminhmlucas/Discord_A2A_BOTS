@@ -205,7 +205,8 @@ class Capabilities:
             self.refresh_secrets()
             if isinstance(request, MemoryRequest):
                 try:
-                    text = await self.memory.execute(request, privacy, self.redact)
+                    credentials = tuple(self.secrets | self.active_secrets)
+                    text = await self.memory.execute(request, privacy, self.redact, credentials)
                 except OSError:
                     # A missing or access-denied memory file, never a network failure.
                     raise CapabilityError("Memory file unavailable") from None

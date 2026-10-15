@@ -68,15 +68,15 @@ An example disabled policy for `bridge_config.json`:
 Place this object under the top-level `memory` key. User/bot scopes must be subsets
 of the global allowed users and enabled roster. Private operations additionally
 require the configured owner. `public`/`private` select delivery permissions;
-PRIVATE markers supply the existing literal DLP policy. Public excerpts are filtered
-against current privacy sources, all configured aliases and retained private-marked
-backups; credential-shaped values and configured environment credentials are masked.
-Credential masking runs on the whole note before PRIVATE-value filtering and before the
-12000-character excerpt limit, so neither a filtered substring nor the cut can expose
-part of a value. Each PRIVATE value is matched both as written and with its own
-credentials masked, so a private line that contains a credential stays private. Public
-excerpts are posted as plain text under a `Memory ALIAS (approved public excerpt):`
-heading; no model reads them.
+PRIVATE markers supply the existing literal DLP policy. A public excerpt is redacted by
+locating, in the unmodified note, every PRIVATE block, every PRIVATE value from current
+privacy sources, all configured aliases and retained private-marked backups, every
+configured environment credential and every credential-shaped value. Overlapping or
+adjacent matches are merged and each merged range is replaced once with `[private]`, so
+no replacement can split or swallow another match; unbalanced markers fail closed. This
+runs on the whole note before the 12000-character excerpt limit, so the cut cannot
+expose part of a value. Public excerpts are posted as plain text under a
+`Memory ALIAS (approved public excerpt):` heading; no model reads them.
 Owner-private reads can show PRIVATE-marked text but still mask known credentials.
 Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.

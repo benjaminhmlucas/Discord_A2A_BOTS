@@ -16,7 +16,7 @@ from bridge_authorization import owner_memory_dm
 from bridge_capabilities import Capabilities
 from bridge_memory import MAX_TEXT, MemoryAccess
 from bridge_memory_io import MemoryStore, CONTROL, digest
-from bridge_privacy import Privacy
+from bridge_privacy import Privacy, redact_spans
 from bridge_http import CapabilityError
 from test_bridge import Author, Bridge, Channel, Client, Message
 from test_memory import populate, memory_config, owner_dm, C
@@ -398,7 +398,7 @@ def test_credential_containing_a_private_value_is_masked_whole(tmp_path):
 
     result = asyncio.run(scenario())
     assert "credprefix" not in result and "credsuffix" not in result
-    assert "[REDACTED CREDENTIAL]" in result
+    assert result.endswith("Shared: [private]")
 
 
 def test_token_shaped_value_split_by_a_private_value_is_masked(tmp_path):
@@ -433,7 +433,7 @@ def test_token_shaped_value_split_by_a_private_value_is_masked(tmp_path):
         return "\n".join(message.content for message, _ in channel.sent)
 
     output = asyncio.run(scenario())
-    assert "Bot token: [private token]" in output
+    assert output.endswith("Bot token: [private]")
     assert "MTIzNDU2" not in output and "abcdefghijklmnop" not in output
 
 
@@ -460,3 +460,72 @@ def test_private_line_containing_a_credential_stays_private(tmp_path, kind):
     result = asyncio.run(scenario())
     assert "Facts\n[private]" in result
     assert "SYNTHETIC PIN 4471" not in result and secret[:10] not in result
+
+
+WEBHOOK = "https://discord.com/api/webhooks/"
+
+
+def test_credential_match_swallowing_private_markers_cannot_publish_the_block(tmp_path):
+    """A greedy webhook match must not erase PRIVATE markers before they are honoured."""
+    root = tmp_path / "memory"
+    populate(root)
+    text = (
+        "Facts. "
+        + WEBHOOK
+        + "a<!-- PRIVATE:START --> pw=hunter2 "
+        + WEBHOOK
+        + "<!-- PRIVATE:END --> tail"
+    )
+    (root / "public.md").write_bytes(text.encode())
+
+    async def provider(*args, **options):
+        raise AssertionError("memory commands never call a provider")
+
+    async def scenario():
+        bridge = Bridge(
+            Client(C),
+            C,
+            provider,
+            lambda _: None,
+            root=tmp_path,
+            memory_dir=root,
+            config=memory_config(root),
+        )
+        channel = Channel()
+        await bridge.handle(Message(1, "<@101> /memory read public", channel))
+        return "\n".join(message.content for message, _ in channel.sent)
+
+    output = asyncio.run(scenario())
+    assert output.endswith("Memory public (approved public excerpt):\nFacts. [private] tail")
+    assert "hunter2" not in output and "PRIVATE" not in output
+
+
+def test_credential_match_crossing_a_private_value_cannot_split_it(tmp_path):
+    root = tmp_path / "memory"
+    populate(root)
+    token_tail = "bbbbbb." + "c" * 25
+    (root / "private.md").write_bytes(
+        (
+            "<!--PRIVATE:START-->x pw=hunter2<!--PRIVATE:END-->\n"
+            f"<!--PRIVATE:START-->{token_tail} SECRETWORD<!--PRIVATE:END-->"
+        ).encode()
+    )
+    public = f"see {WEBHOOK}x pw=hunter2 and {'a' * 24}.{token_tail} SECRETWORD end"
+    (root / "public.md").write_bytes(public.encode())
+    capabilities = Capabilities(memory_config(root), lambda _: None)
+    request = capabilities.authorize("/memory read public", Message(1, "", Channel()), C)
+    result = asyncio.run(capabilities.execute(request, Privacy(root)))
+    assert result.endswith("\nsee [private] and [private] end")
+    assert "hunter2" not in result and "SECRETWORD" not in result
+
+
+def test_span_redaction_merges_matches_and_fails_closed():
+    assert redact_spans("ab cd ef", ("AB",), ()) == "[private] cd ef"
+    # Overlapping and adjacent matches become one placeholder; text between stays.
+    assert redact_spans("one two three four", ("one two", "two three"), ()) == "[private] four"
+    assert redact_spans("keyvalue rest", ("key",), ("value",)) == "[private] rest"
+    assert redact_spans("plain", ("", " "), ("",)) == "plain"
+    assert redact_spans("a<!--PRIVATE:START-->x<!--PRIVATE:END-->b", (), ()) == "a[private]b"
+    for malformed in ("<!--PRIVATE:START--> open", "x <!-- PRIVATE:END -->"):
+        with pytest.raises(RuntimeError, match="Malformed"):
+            redact_spans(malformed, (), ())

@@ -22,12 +22,49 @@ def private_values(text: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+CREDENTIAL_PATTERNS = (
+    (re.compile(r"(?i)(?:https://discord(?:app)?\.com/api/webhooks/)\S+"), "[private webhook]"),
+    (re.compile(r"\bAIza[\w-]{30,}\b"), "[private key]"),
+    (re.compile(r"\b[\w-]{23,30}\.[\w-]{6}\.[\w-]{25,}\b"), "[private token]"),
+)
+
+
 def redact_credentials(text: str) -> str:
-    text = re.sub(
-        r"(?i)(?:https://discord(?:app)?\.com/api/webhooks/)\S+", "[private webhook]", text
-    )
-    text = re.sub(r"\bAIza[\w-]{30,}\b", "[private key]", text)
-    return re.sub(r"\b[\w-]{23,30}\.[\w-]{6}\.[\w-]{25,}\b", "[private token]", text)
+    for pattern, placeholder in CREDENTIAL_PATTERNS:
+        text = pattern.sub(placeholder, text)
+    return text
+
+
+def redact_spans(text: str, values: tuple[str, ...], credentials: tuple[str, ...]) -> str:
+    """Redact PRIVATE blocks, PRIVATE values and credentials found in the original text.
+
+    Every match is located in the unmodified text, then overlapping or adjacent matches
+    are merged and each merged range is replaced once. Sequential substitution cannot
+    be used here: one replacement can split or swallow part of another match, leaving
+    the rest of a private value or credential in the output.
+    """
+    blocks = [match.span() for match in BLOCK.finditer(text)]
+    if any(not any(a <= t.start() and t.end() <= b for a, b in blocks) for t in TAG.finditer(text)):
+        raise RuntimeError("Malformed private text")
+    spans = list(blocks)
+    # Spaces/newlines and case variation should not bypass literal DLP. Blank values
+    # would match the empty string everywhere, so they are skipped.
+    patterns = [r"\s+".join(map(re.escape, value.split())) for value in values if value.split()]
+    for value_pattern in patterns:
+        spans.extend(match.span() for match in re.finditer(value_pattern, text, re.I))
+    for secret in filter(None, credentials):
+        spans.extend(match.span() for match in re.finditer(re.escape(secret), text))
+    for credential_pattern, _ in CREDENTIAL_PATTERNS:
+        spans.extend(match.span() for match in credential_pattern.finditer(text))
+    output: list[str] = []
+    position = 0
+    for start, end in sorted(spans):
+        if start > position or not output:
+            output.append(text[position:start])
+            output.append("[private]")
+        position = max(position, end)
+    output.append(text[position:])
+    return "".join(output)
 
 
 class Privacy:

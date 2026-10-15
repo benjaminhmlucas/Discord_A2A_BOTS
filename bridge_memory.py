@@ -13,7 +13,7 @@ from typing import Any
 
 from bridge_authorization import eligible_sender, owner_memory_dm
 from bridge_http import CapabilityError
-from bridge_privacy import private_values, redact_credentials
+from bridge_privacy import private_values, redact_credentials, redact_spans
 from bridge_memory_io import MemoryStore, digest
 
 ALIAS = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,31}\Z")
@@ -214,17 +214,18 @@ class MemoryAccess:
         return files, tuple(sorted(set(values), key=len, reverse=True))
 
     def public_text(
-        self, text: str, values: tuple[str, ...], privacy: Any, redact: Callable[[str], str]
+        self, text: str, values: tuple[str, ...], privacy: Any, credentials: tuple[str, ...]
     ) -> str:
-        # Credentials are masked in `text` before this runs, so a PRIVATE value that
-        # contains a credential must also be matched in its masked form.
-        raw = (*privacy.refresh(), *values)
-        masked = (redact_credentials(redact(value)) for value in raw)
-        candidates = tuple(sorted({*raw, *masked}, key=len, reverse=True))
-        return str(privacy._filter(redact_credentials(redact(text)), candidates))
+        # All PRIVATE sources, every alias and retained backups, plus credentials, are
+        # located in the original note so no replacement can split another match.
+        return redact_spans(text, (*privacy.refresh(), *values), credentials)
 
     async def execute(
-        self, request: MemoryRequest, privacy: Any, redact: Callable[[str], str]
+        self,
+        request: MemoryRequest,
+        privacy: Any,
+        redact: Callable[[str], str],
+        credentials: tuple[str, ...] = (),
     ) -> str:
         # This dispatcher is only called after the runtime verified private delivery.
         outcome = "failed"
@@ -270,13 +271,12 @@ class MemoryAccess:
                 text = data.decode("utf-8-sig")
                 # Redact whole values before truncating so a cut cannot expose a prefix.
                 if request.mode == "read":
-                    # Mask configured and credential-shaped values before PRIVATE-value
-                    # filtering, which could otherwise split one so its exact match or
-                    # shape no longer applies. A direct bridge reply, never model input.
-                    text = await asyncio.to_thread(self.public_text, text, values, privacy, redact)
+                    # A direct bridge reply, never model input: show filtered text as written.
+                    text = await asyncio.to_thread(
+                        self.public_text, text, values, privacy, credentials
+                    )
                     result = (
-                        f"Memory {request.alias} (approved public excerpt):\n"
-                        + redact(text)[:MAX_TEXT]
+                        f"Memory {request.alias} (approved public excerpt):\n" + text[:MAX_TEXT]
                     )
                 elif request.mode == "private":
                     result = (
