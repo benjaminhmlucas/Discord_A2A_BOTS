@@ -68,24 +68,63 @@ def redact_spans(
         if value.split()
     ]
     patterns += [re.compile(re.escape(secret)) for secret in filter(None, credentials)]
-    # A second token can start inside the first token's last segment and extend past it.
-    patterns.append(TOKEN)
     for pattern in patterns:
-        # A lookahead reports every start position, so overlapping occurrences count.
-        overlapping = re.compile(f"(?=({pattern.pattern}))", pattern.flags)
-        spans.extend(match.span(1) for match in overlapping.finditer(text))
-    for run_pattern in RUN_PATTERNS:
-        spans.extend(match.span() for match in run_pattern.finditer(text))
+        spans.extend(_overlapping(pattern, text))
+    shapes = _shape_spans(text)
+    covered = [False] * len(text)
+    for start, end in spans + shapes:
+        covered[start:end] = [True] * (end - start)
+    while True:
+        # A placeholder splits a character run, so removing a value can create a credential
+        # shape, and masking one shape can cut off another that only exists once a value
+        # is removed. Search the text with only private values removed and with everything
+        # removed, map new shapes back onto the original text, and repeat. Each pass
+        # covers at least one more original character, so this terminates.
+        new = []
+        for hidden in (spans, spans + shapes):
+            output, origin = _render(text, hidden)
+            for start, end in _shape_spans(output):
+                span = (origin[start][0], origin[end - 1][1])
+                if not all(covered[span[0] : span[1]]):
+                    new.append(span)
+                    covered[span[0] : span[1]] = [True] * (span[1] - span[0])
+        if not new:
+            return _render(text, spans + shapes)[0]
+        shapes += new
+
+
+def _overlapping(pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
+    # A lookahead reports every start position, so overlapping occurrences count.
+    lookahead = re.compile(f"(?=({pattern.pattern}))", pattern.flags)
+    return [match.span(1) for match in lookahead.finditer(text)]
+
+
+def _shape_spans(text: str) -> list[tuple[int, int]]:
+    # A second token can start inside the first token's last segment and extend past it.
+    spans = _overlapping(TOKEN, text)
+    spans.extend(match.span() for pattern in RUN_PATTERNS for match in pattern.finditer(text))
+    return spans
+
+
+def _render(text: str, spans: list[tuple[int, int]]) -> tuple[str, list[tuple[int, int]]]:
+    """Replace merged spans once; map each output character to its original range."""
     output: list[str] = []
+    origin: list[tuple[int, int]] = []
     position = 0
     for start, end in sorted(spans):
         if start > position or not output:
             output.append(text[position:start])
+            origin.extend((index, index + 1) for index in range(position, start))
             output.append("[private]")
+            origin.extend([(start, end)] * len("[private]"))
+        elif end > position:
+            # Extend the current placeholder's original range to the merged span.
+            first = len(origin) - len("[private]")
+            origin[first:] = [(origin[first][0], end)] * len("[private]")
         position = max(position, end)
     output.append(text[position:])
-    # Text joined at a placeholder can newly form a credential shape; mask any that remain.
-    return redact_credentials("".join(output))
+    origin.extend((index, index + 1) for index in range(position, len(text)))
+    return "".join(output), origin
 
 
 class Privacy:

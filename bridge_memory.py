@@ -264,7 +264,9 @@ class MemoryAccess:
                     raise
             else:
                 if request.mode == "propose":
-                    await asyncio.to_thread(self.store.write_allowed)
+                    await asyncio.to_thread(
+                        self.store.write_allowed, self.files[request.alias]["path"]
+                    )
                 files, values = await asyncio.to_thread(self.snapshot)
                 data = files[request.alias]
                 text = data.decode("utf-8-sig")

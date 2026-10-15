@@ -318,14 +318,14 @@ class MemoryStore:
         return path.stat().st_size if path.exists() else 0
 
     def commit(self, alias: str, expected: str, after: bytes) -> str:
-        self.write_allowed()
+        definition = self.files[alias]
+        relative = definition["path"]
+        self.write_allowed(relative)
         with self.lock():
             if self.pending() is not None:
                 raise CapabilityError("Memory recovery required")
             # Shared protocol writes need a separate reviewed policy. Dedicated notes only.
-            self.write_allowed()
-            definition = self.files[alias]
-            relative = definition["path"]
+            self.write_allowed(relative)
             before = self.read(relative)
             if digest(before) != expected:
                 raise CapabilityError("Memory revision conflict")
@@ -389,11 +389,11 @@ class MemoryStore:
         )
 
     def recover(self, identity: str) -> str:
-        self.write_allowed()
         with self.lock():
             record = self.pending()
             if record is None or record["id"] != identity:
                 raise CapabilityError("Memory recovery unavailable")
+            self.write_allowed(record["path"])
             current = digest(self.read(record["path"]))
             if current not in (record["before_hash"], record["after_hash"]):
                 raise CapabilityError("Memory recovery conflict")
@@ -405,13 +405,15 @@ class MemoryStore:
             state = "confirmed revision kept" if applied else "change was not applied"
             return f"Memory {record['alias']} recovered ({state}); receipt {identity}."
 
-    def write_allowed(self) -> None:
-        root = self.path(".")
+    def write_allowed(self, relative: str) -> None:
+        # Check every directory above the note, so a shared protocol tree nested inside
+        # the root, the root itself and any directory containing it are all refused.
+        parent = self.path(relative, missing=True).parent
         if any(
             all(
                 (directory / name).is_file()
                 for name in ("AGENTS.md", "LIVE_STATE.md", "SESSION_LOG.md")
             )
-            for directory in (root, *root.parents)
+            for directory in (parent, *parent.parents)
         ):
             raise CapabilityError("Shared-memory writes unavailable")

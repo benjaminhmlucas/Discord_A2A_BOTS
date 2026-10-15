@@ -11,10 +11,11 @@ capability budgets also apply. Memory commands produce direct bridge replies and
 never invoke a model or MCP server.
 
 Ben selected **dedicated notes first**. Shared task/protocol records are read-only.
-Writes beneath a shared root containing AGENTS.md, LIVE_STATE.md and SESSION_LOG.md
-are refused. Canonical shared filenames cannot be configured as writable aliases.
-This version does not write shared-agent identity/checkpoint records or alter
-STATIC_PROCEDURES.md. Shared task-board updates require a separate policy.
+Writes are refused when the note's directory, the root or any directory above them
+contains AGENTS.md, LIVE_STATE.md and SESSION_LOG.md. Canonical shared filenames cannot
+be configured as writable aliases. This version does not write shared-agent
+identity/checkpoint records or alter STATIC_PROCEDURES.md. Shared task-board updates
+require a separate policy.
 
 ## Commands and delivery
 
@@ -73,8 +74,10 @@ locating, in the unmodified note, every PRIVATE block, every PRIVATE value from 
 privacy sources, all configured aliases and retained private-marked backups, every
 configured environment credential and every credential-shaped value, counting
 overlapping occurrences. Overlapping or adjacent matches are merged and each merged range
-is replaced once with `[private]`, so no replacement can split or swallow another match;
-a final credential-pattern pass catches any shape formed where text meets a placeholder.
+is replaced once with `[private]`, so no replacement can split or swallow another match.
+Because a placeholder splits a run of characters, removing a value can create a new
+credential shape; such shapes are found in the redacted text, mapped back onto the note
+and redacted too, repeating until none remain.
 Unbalanced markers fail closed. This runs on the whole note before the 12000-character
 excerpt limit, so the cut cannot expose part of a value. Public excerpts are posted as
 plain text under a `Memory ALIAS (approved public excerpt):` heading; no model reads

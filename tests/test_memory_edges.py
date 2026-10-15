@@ -559,3 +559,26 @@ def test_span_redaction_masks_every_credential_shape_including_nested_tokens():
     run = (WEBHOOK * 2000)[:65536]
     assert redact_spans(run, (), ()) == "[private]"
     assert time.perf_counter() - started < 2
+
+
+def test_span_redaction_finds_shapes_formed_by_removal_and_contained_matches():
+    # Removing the value makes a token shape whose last segment also holds a key shape.
+    token = "M" * 24 + ".GabcDE.-AIza" + "k" * 30
+    assert redact_spans("x zzzzzzzzzz" + token + " y", ("zzzzzzzzzz",), ()) == "x [private] y"
+    # A match wholly inside another adds nothing and leaves the outer range intact.
+    assert redact_spans("a abc z", ("abc",), ("b",)) == "a [private] z"
+
+
+def test_writes_are_refused_inside_a_nested_shared_protocol_tree(tmp_path):
+    root = tmp_path / "memory"
+    populate(root)
+    shared = root / "shared"
+    shared.mkdir()
+    for name in ("AGENTS.md", "LIVE_STATE.md", "SESSION_LOG.md"):
+        (shared / name).write_text("Shared protocol file", encoding="utf-8")
+    (shared / "notes.md").write_text("note", encoding="utf-8")
+    files = {"n": {"path": "shared/notes.md", "public": False, "private": True, "write": "replace"}}
+    store = MemoryStore(root, files)
+    with pytest.raises(CapabilityError, match="Shared-memory"):
+        store.commit("n", digest(b"note"), b"new")
+    assert (shared / "notes.md").read_bytes() == b"note" and store.pending() is None
