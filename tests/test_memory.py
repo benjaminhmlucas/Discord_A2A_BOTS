@@ -88,10 +88,28 @@ def test_public_memory_real_consumer_redaction_and_no_provider(tmp_path):
 
 
 def owner_dm():
+    """Owner whose inbound DM channel matches discord.py's shape.
+
+    discord.py 2.x builds the channel of an incoming DM without recipients
+    (DMChannel._from_message), so `recipient` is None there. Only create_dm()
+    returns a channel with the recipient filled in; both share the DM's id.
+    """
     author = Author()
     author.dm.id = 401
     author.dm.type = discord.ChannelType.private
-    author.dm.recipient = author
+    author.dm.recipient = None
+    resolved = Channel(401)
+    resolved.type, resolved.recipient, resolved.sent = (
+        discord.ChannelType.private,
+        author,
+        author.dm.sent,
+    )
+    author.resolved_dm = resolved
+
+    async def create_dm():
+        return resolved
+
+    author.create_dm = create_dm
     return author
 
 
@@ -189,7 +207,7 @@ def test_private_destination_failure_prevents_actual_memory_opens(tmp_path):
 
     async def scenario():
         author = owner_dm()
-        author.dm.recipient = Author(999)
+        author.resolved_dm.recipient = Author(999)
         bridge = Bridge(
             Client(C),
             C,
@@ -463,8 +481,15 @@ def test_memory_files_fail_closed_through_actual_dispatch(tmp_path, kind):
     caps = Capabilities(memory_config(root), lambda _: None)
     request = caps.authorize("/memory read public", Message(1, "", Channel()), C)
 
+    error, reason = {
+        "malformed": (RuntimeError, "Malformed privacy markers"),
+        "oversized": (CapabilityError, "Memory file denied"),
+        "hardlink": (CapabilityError, "Memory links denied"),
+        "missing": (CapabilityError, "Memory file unavailable"),
+    }[kind]
+
     async def scenario():
-        with pytest.raises((CapabilityError, RuntimeError, FileNotFoundError)):
+        with pytest.raises(error, match=reason):
             await caps.execute(request, Privacy(root))
 
     asyncio.run(scenario())
@@ -524,8 +549,10 @@ def test_actual_link_and_permission_denial_prevent_memory_dispatch(tmp_path, kin
         caps = Capabilities(config, lambda _: None)
         request = caps.authorize("/memory read public", Message(1, "", Channel()), C)
 
+        reason = "Memory links denied" if kind == "linked_directory" else "Memory file unavailable"
+
         async def scenario():
-            with pytest.raises((CapabilityError, PermissionError)):
+            with pytest.raises(CapabilityError, match=reason):
                 await caps.execute(request, Privacy(root))
 
         asyncio.run(scenario())

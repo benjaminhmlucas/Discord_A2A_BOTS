@@ -359,7 +359,11 @@ class Bridge:
                 destination = await asyncio.wait_for(
                     message.author.create_dm(), self.config["send_seconds"]
                 )
-                if private_memory and not private_destination(destination, self.config["owner_id"]):
+                if private_memory and (
+                    not private_destination(destination, self.config["owner_id"])
+                    # A command sent in a DM must come from this verified owner DM.
+                    or (owner_dm and destination.id != message.channel.id)
+                ):
                     raise CapabilityError("Private memory destination denied")
                 await self.send(
                     destination,

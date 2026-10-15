@@ -22,6 +22,11 @@ def private_destination(channel: Any, owner: int) -> bool:
 
 
 def owner_memory_dm(message: Any, bot_id: int, config: dict[str, Any]) -> bool:
+    # discord.py builds an inbound DM channel without recipients, so the recipient is
+    # unknown here. A non-guild private channel whose human author is the owner can only
+    # be the owner's DM with this bot. The runtime confirms it against create_dm() before
+    # any private memory I/O.
+    channel = message.channel
     return (
         type(message.author.id) is int
         and message.author.id == config["owner_id"]
@@ -30,7 +35,9 @@ def owner_memory_dm(message: Any, bot_id: int, config: dict[str, Any]) -> bool:
         and not message.webhook_id
         and getattr(message, "guild", None) is None
         and bot_id in config["enabled_bots"]
-        and private_destination(message.channel, config["owner_id"])
+        and type(getattr(channel, "id", None)) is int
+        and channel.id > 0
+        and getattr(channel, "type", None) is discord.ChannelType.private
     )
 
 

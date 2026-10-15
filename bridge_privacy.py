@@ -46,14 +46,18 @@ class Privacy:
         for directory, children, files in os.walk(
             self.memory_dir, onerror=scan_error, followlinks=False
         ):
-            for candidate in [
-                Path(directory),
-                *(Path(directory) / name for name in children + files),
-            ]:
-                if (
-                    candidate.is_symlink()
-                    or getattr(candidate.lstat(), "st_file_attributes", 0) & 0x400
-                ):
+            entries = [(Path(directory), False), *((Path(directory) / n, False) for n in children)]
+            # Memory note commits create and rename non-Markdown temporaries in this tree;
+            # one may vanish after listing. Directories and Markdown sources must not.
+            entries += [(Path(directory) / n, not n.lower().endswith(".md")) for n in files]
+            for candidate, transient in entries:
+                try:
+                    metadata = candidate.lstat()
+                except FileNotFoundError:
+                    if transient:
+                        continue
+                    raise
+                if candidate.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400:
                     raise RuntimeError("Privacy source symlink/reparse point rejected")
             paths.extend(Path(directory) / name for name in files if name.lower().endswith(".md"))
         paths.sort()

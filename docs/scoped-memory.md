@@ -32,10 +32,13 @@ In the owner's direct DM with that bot (no mention needed):
 - `/memory recover RECEIPT`: explicitly recover that recorded transaction.
 
 Write text and confirmations are refused in public channels. Bot authors, webhooks,
-quoted commands, forged owner IDs and group DMs cannot authorize private access.
-The runtime verifies the DM recipient and sends an acceptance message there before
-any memory reads or writes; a failed destination prevents dispatch with no public
-fallback. A mention inside note text does not select another bot. Confirmation tokens
+quoted commands, forged owner IDs, guild channels and group DMs cannot authorize private
+access. Discord does not name the recipient of an incoming DM, so a DM command is
+accepted from the configured owner in a private, non-guild channel. Before any private
+memory read or write, the runtime asks Discord for the owner's DM, requires that it is
+the owner's private channel and, for a DM command, the same channel the command came
+from, and sends an acceptance message there. A failed destination prevents dispatch
+with no public fallback. A mention inside note text does not select another bot. Confirmation tokens
 are bound to the owner and selected bot, single-use, bounded to 16 pending proposals,
 and discarded on expiry or restart. Nothing in memory text can dispatch another action.
 
@@ -100,12 +103,14 @@ alias, receipt, hashes, timestamp and outcome (`prepared`, `committed`, `abandon
 Preimage backups retain PRIVATE markers so replacing a note does not erase the deny
 set for its old private values. At 64 receipts/backups or approximately 1 MiB of audit
 metadata, new writes stop until the operator archives records while preserving the
-journal. Nothing silently prunes these append-only records.
+journal; reads continue. Nothing silently prunes these append-only records.
 
 If the final revision check finds an external edit, nothing is written: the commit is
 journaled as `abandoned`, its pending record is closed and the owner sees a revision
-conflict. Only an interrupted commit (for example, a crash) leaves a pending record;
-later commits are refused until it is resolved. The owner inspects `status` and
+conflict. Any other failure after preparation (a crash, a write error, or a failed
+final audit entry) leaves a pending record, even if the note was already replaced;
+later commits are refused until it is resolved. After any refused commit, check
+`/memory status`. The owner inspects `status` and
 explicitly selects `recover RECEIPT`. Recovery rolls forward: if the note already has
 the confirmed revision it is kept (`recovered-applied`); if the note still has the
 prior revision, the change was not applied and only the record is closed
@@ -116,18 +121,24 @@ Atomic write/recovery work finishes before cancellation releases the request's l
 a Discord timeout can occur after the file changed. Inspect the private revision
 and receipt before retrying; a used confirmation cannot be replayed.
 
-Memory refusals reply with a fixed reason, for example `Memory revision conflict`,
+A command the policy does not allow (wrong channel, non-owner, unknown alias or
+malformed arguments) gets the generic reply `Bridge: capability request denied; check
+configuration and command arguments.` An allowed command that then fails replies with
+a fixed reason, for example `Memory revision conflict`,
 `Memory confirmation unavailable`, `Memory file unavailable` (missing or access-denied
 file) or `Memory busy; try again shortly` (another bridge writer holds the root lock).
 These reasons never include note text, paths or credentials.
 
 ## AC evidence and deployment
 
-`tests/test_memory.py` exercises actual configuration/authorization, bounded files,
-private routing, exact previews, confirmations, replay/expiry, concurrent real writers,
-hard links, redaction and actual process-crash recovery through production code.
-Discord transport and provider replies are test adapters; the authorization,
-filesystem, SQLite and memory dispatcher are not mocked. OS fault-injection tests
+`tests/test_memory.py`, `tests/test_memory_edges.py` and `tests/test_memory_io.py`
+exercise actual configuration/authorization, bounded files, private routing, exact
+previews, confirmations, replay/expiry, concurrent real writers, hard links, redaction,
+roll-forward recovery after real process crashes and cancellation through production
+code. Owner-DM authorization is also checked against messages built by discord.py's own
+gateway parser, so the test DM shape matches the library. Discord transport and provider
+replies are test adapters; the authorization, filesystem, SQLite and memory dispatcher
+are not mocked. OS fault-injection tests
 cover failure paths separately from real native behavior. Both platform CI suites
 and exact coverage/security gates must pass before review readiness.
 

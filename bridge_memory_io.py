@@ -326,12 +326,11 @@ class MemoryStore:
             if len(after) > MAX_BYTES:
                 raise CapabilityError("Memory file too large")
             control = self.path(CONTROL)
-            if (
-                sum(
-                    path.name.startswith("receipt-") and path.name.endswith(".json")
-                    for path in control.iterdir()
-                )
-                >= 64
+            names = [path.name for path in control.iterdir()]
+            # Reads refuse more than 64 backups, so writes stop before either record reaches it.
+            if any(
+                sum(name.startswith(prefix) and name.endswith(suffix) for name in names) >= 64
+                for prefix, suffix in (("receipt-", ".json"), ("backup-", ".md"))
             ):
                 raise CapabilityError("Memory recovery capacity reached")
             identity = secrets.token_hex(16)
