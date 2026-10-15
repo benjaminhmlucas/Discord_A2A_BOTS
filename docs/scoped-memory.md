@@ -1,0 +1,117 @@
+# Scoped memory and confirmed notes (issue #18)
+
+Memory access is off by default. It does not inherit model tools or arbitrary file
+access. Operators configure up to 32 named Markdown files under one absolute local
+root; that root must equal the installation's privacy source. Each file is at most
+64 KiB, and each displayed excerpt or submitted note is at most 12000 characters.
+Files must already exist. Paths, links, junctions, hard links, invalid UTF-8, unreadable
+sources and malformed PRIVATE markers fail closed. Filesystem work runs in worker
+threads; the existing bounded queue, per-bot lock and persistent admission/daily
+capability budgets also apply. Memory commands produce direct bridge replies and
+never invoke a model or MCP server.
+
+Ben selected **dedicated notes first**. Shared task/protocol records are read-only.
+Writes beneath a shared root containing AGENTS.md, LIVE_STATE.md and SESSION_LOG.md
+are refused. Canonical shared filenames cannot be configured as writable aliases.
+This version does not write shared-agent identity/checkpoint records or alter
+STATIC_PROCEDURES.md. Shared task-board updates require a separate policy.
+
+## Commands and delivery
+
+In the configured public channel:
+
+- `<@BOT_ID> /memory read facts`: retrieve an approved public excerpt.
+- `<@BOT_ID> /memory private notes`: verified owner only; results go to the owner's DM.
+
+In the owner's direct DM with that bot (no mention needed):
+
+- `/memory private notes`: view the note and its SHA-256 revision.
+- `/memory propose notes REVISION {"text":"new note text"}`: private preview, no file change.
+- `/memory commit CONFIRMATION`: confirm the exact proposed change within 120 seconds.
+- `/memory status`: inspect a pending recovery receipt.
+- `/memory recover RECEIPT`: explicitly recover that recorded transaction.
+
+Write text and confirmations are refused in public channels. Bot authors, webhooks,
+quoted commands, forged owner IDs and group DMs cannot authorize private access.
+The runtime verifies the DM recipient and sends an acceptance message there before
+any memory reads or writes; a failed destination prevents dispatch with no public
+fallback. A mention inside note text does not select another bot. Confirmation tokens
+are bound to the owner and selected bot, single-use, bounded to 16 pending proposals,
+and discarded on expiry or restart. Nothing in memory text can dispatch another action.
+
+## Configuration
+
+An example disabled policy for `bridge_config.json`:
+
+```json
+{
+  "enabled": false,
+  "root": "C:/BotBridgeNotes",
+  "user_ids": [123456789],
+  "bot_ids": [987654321],
+  "credential_env": ["BOTBRIDGE_MCP_DOCS"],
+  "files": {
+    "facts": {"path": "facts.md", "public": true, "private": false, "write": null},
+    "notes": {"path": "notes.md", "public": false, "private": true, "write": "replace"},
+    "log": {"path": "notes/log.md", "public": false, "private": true, "write": "append"}
+  }
+}
+```
+
+Place this object under the top-level `memory` key. User/bot scopes must be subsets
+of the global allowed users and enabled roster. Private operations additionally
+require the configured owner. `public`/`private` select delivery permissions;
+PRIVATE markers supply the existing literal DLP policy. Public excerpts are filtered
+against current privacy sources, all configured aliases and retained private-marked
+backups; credential-shaped values and configured environment credentials are masked.
+Owner-private reads can show PRIVATE-marked text but still mask known credentials.
+Literal filtering does not identify every paraphrase or encoding of a secret.
+Curate public files and review every server-side credential scope before enablement.
+
+Precreate the root, approved files and nested directories with restrictive owner-only
+filesystem permissions. Windows control files inherit those ACLs; POSIX control files
+use mode 0600 and the control directory 0700. Use a local disk, not UNC/network
+storage. Do not let untrusted accounts write this root. Keep the existing privacy
+source set to the same root. Paths and exact public/private/write policy need
+operator review and isolated acceptance before activation. Set `enabled: false`
+and restart through the normal deployment workflow to disable the feature.
+
+## Conflicts and recovery
+
+Notes use atomic replacement and file flushes, with bounded Windows sharing retries.
+Directory handles prevent Windows directory replacement during operations; POSIX
+reads/replacements use pinned directory descriptors. A root-scoped SQLite transaction
+serializes bridge writers. The expected revision is checked before durable preparation
+and immediately before replacement. External editors do not participate in this lock;
+review the newest revision after an external change before proposing another write.
+
+The private `.botbridge-memory` directory retains preimages, immutable receipts,
+a pending record and an append-only metadata journal. Audit records contain alias,
+receipt, hashes, timestamp and outcome, never note contents or credentials. Backups
+retain PRIVATE markers so replacing a note does not erase the deny set for its old
+private values. At 64 receipts/backups or approximately 1 MiB of audit metadata,
+new writes stop until the operator archives records while preserving the journal.
+Nothing silently prunes these append-only records.
+
+A failed/interrupted write can require recovery; later commits are refused while
+a pending record exists. The owner inspects `status` and explicitly selects
+`recover RECEIPT`. Replace recovery restores the preimage only if the current
+revision still matches the recorded before/after hashes. Append recovery preserves
+already appended text. Unrelated external edits are never overwritten by recovery.
+Atomic write/recovery work finishes before cancellation releases the request's lock;
+a Discord timeout can occur after the file changed. Inspect the private revision
+and receipt before retrying; a used confirmation cannot be replayed.
+
+## AC evidence and deployment
+
+`tests/test_memory.py` exercises actual configuration/authorization, bounded files,
+private routing, exact previews, confirmations, replay/expiry, concurrent real writers,
+hard links, redaction and actual process-crash recovery through production code.
+Discord transport and provider replies are test adapters; the authorization,
+filesystem, SQLite and memory dispatcher are not mocked. OS fault-injection tests
+cover failure paths separately from real native behavior. Both platform CI suites
+and exact coverage/security gates must pass before review readiness.
+
+No live shared-memory, provider-account or Discord acceptance is claimed by fixtures.
+Keep access off until the reviewed aliases, ACLs, privacy source and delivery policy
+pass an isolated acceptance run. Live enablement/deployment remains a separate action.
