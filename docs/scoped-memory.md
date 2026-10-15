@@ -83,8 +83,11 @@ Notes use atomic replacement and file flushes, with bounded Windows sharing retr
 Directory handles prevent Windows directory replacement during operations; POSIX
 reads/replacements use pinned directory descriptors. A root-scoped SQLite transaction
 serializes bridge writers. The expected revision is checked before durable preparation
-and immediately before replacement. External editors do not participate in this lock;
-review the newest revision after an external change before proposing another write.
+and immediately before replacement. External editors do not participate in this lock.
+The revision check and replacement are separate filesystem operations: an external
+edit after the final check can race either a commit or recovery. Pause bridge writes
+before editing these files elsewhere, then read the newest revision before proposing
+another write. This is revision conflict detection, not a filesystem compare-and-swap.
 
 The private `.botbridge-memory` directory retains preimages, immutable receipts,
 a pending record and an append-only metadata journal. Audit records contain alias,
@@ -98,7 +101,8 @@ A failed/interrupted write can require recovery; later commits are refused while
 a pending record exists. The owner inspects `status` and explicitly selects
 `recover RECEIPT`. Replace recovery restores the preimage only if the current
 revision still matches the recorded before/after hashes. Append recovery preserves
-already appended text. Unrelated external edits are never overwritten by recovery.
+already appended text. Recovery refuses unrelated external revisions that it observes;
+the same external-editor coordination requirement applies during recovery.
 Atomic write/recovery work finishes before cancellation releases the request's lock;
 a Discord timeout can occur after the file changed. Inspect the private revision
 and receipt before retrying; a used confirmation cannot be replayed.
