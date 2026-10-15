@@ -497,7 +497,7 @@ class Bridge:
                     message if not private else None,
                     next_bot if index == len(chunks) - 1 else None,
                 )
-            if private:
+            if private and destination.id != message.channel.id:
                 await self.send(
                     message.channel,
                     f"Bridge: {'memory' if private_memory else 'work'} result delivered privately to the owner.",
@@ -521,11 +521,13 @@ class Bridge:
                 last_error=error_code, requests_failed=self.health["requests_failed"] + 1
             )
             self.log(f"Request {message.id} failed: {error_code}")
-            notice = (
-                "Bridge: request timed out; please try again."
-                if isinstance(exc, asyncio.TimeoutError)
-                else "Bridge: request failed; details are recorded locally. Please try again."
-            )
+            if isinstance(exc, asyncio.TimeoutError):
+                notice = "Bridge: request timed out; please try again."
+            elif memory_request and isinstance(exc, CapabilityError):
+                # Memory refusals are static literals (conflict, expired confirmation, busy).
+                notice = f"Bridge: memory request refused ({exc})."
+            else:
+                notice = "Bridge: request failed; details are recorded locally. Please try again."
             try:
                 await self.send(message.channel, notice, message)
             except Exception as send_error:

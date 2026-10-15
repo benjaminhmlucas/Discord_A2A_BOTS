@@ -69,13 +69,17 @@ def test_public_memory_real_consumer_redaction_and_no_provider(tmp_path):
             Client(C), C, provider, logs.append, root=tmp_path, memory_dir=root, config=config
         )
         channel = Channel()
+        public = root / "public.md"
+        public.write_text(public.read_text() + '\nSecond "quoted" line.', encoding="utf-8")
         with patch.dict(os.environ, {"BOTBRIDGE_MEMORY_TEST_KEY": "synthetic-credential-canary"}):
             await bridge.handle(Message(1, "<@101> /memory read public", channel))
         output = "\n".join(message.content for message, _ in channel.sent)
-        assert "Approved facts" in output
+        assert "Memory public (approved public excerpt):\nApproved facts" in output
+        # A direct reply shows the note as written, not as an escaped JSON string.
+        assert '\nSecond "quoted" line.' in output and "\\n" not in output
         assert "SYNTHETIC PRIVATE VALUE" not in output
         assert "synthetic-credential-canary" not in output
-        assert "untrusted data" in output and not calls
+        assert "untrusted data" not in output and not calls
         assert not bridge.lock.locked() and bridge.pending == 0
         assert "SYNTHETIC PRIVATE VALUE" not in "\n".join(logs)
         assert "synthetic-credential-canary" not in "\n".join(logs)
@@ -126,8 +130,12 @@ def test_private_reads_exact_preview_confirm_replay_and_conflict(tmp_path):
             text.encode()
         )
         journal = (root / CONTROL / "audit.jsonl").read_bytes()
+        assert "delivered privately" not in "\n".join(m.content for m, _ in author.dm.sent)
+        assert any("delivered privately" in m.content for m, _ in public.sent)
         await bridge.handle(Message(4, "/memory commit " + token, author.dm, author))
-        assert "request failed" in author.dm.sent[-1][0].content
+        assert author.dm.sent[-1][0].content == (
+            "Bridge: memory request refused (Memory confirmation unavailable)."
+        )
         assert (
             note.read_bytes() == text.encode()
             and (root / CONTROL / "audit.jsonl").read_bytes() == journal
@@ -149,6 +157,9 @@ def test_private_reads_exact_preview_confirm_replay_and_conflict(tmp_path):
         note.write_bytes(b"external edit")
         await bridge.handle(Message(7, "/memory commit " + token, author.dm, author))
         assert note.read_bytes() == b"external edit"
+        assert author.dm.sent[-1][0].content == (
+            "Bridge: memory request refused (Memory revision conflict)."
+        )
         assert not calls and bridge.pending == 0 and not bridge.lock.locked()
         assert "SYNTHETIC PRIVATE VALUE" not in "\n".join(logs)
         assert text not in "\n".join(logs)
@@ -313,8 +324,10 @@ def test_expired_wrong_bot_and_bad_proposals_never_mutate(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("stage", ["notes.md", "pending.json"])
 @pytest.mark.parametrize("mode", ["replace", "append"])
-def test_real_process_crash_and_durable_recovery_preserve_audit(tmp_path, mode):
+def test_real_process_crash_and_durable_recovery_preserve_audit(tmp_path, mode, stage):
+    """Kill a real writer after the note (or only the pending record) was replaced."""
     root = tmp_path / "memory"
     populate(root)
     config = memory_config(root)
@@ -331,13 +344,13 @@ root=Path(sys.argv[1]); files=json.loads(sys.argv[2]); after=bytes.fromhex(sys.a
 real=os.replace
 def crash(source,destination,**options):
     real(source,destination,**options)
-    if str(destination).endswith("notes.md"):
+    if str(destination).endswith(sys.argv[4]):
         os._exit(73)
 os.replace=crash
 MemoryStore(root,files).commit("notes",digest((root/"notes.md").read_bytes()),after)
 """
     result = subprocess.run(
-        [sys.executable, "-c", script, str(root), json.dumps(files), after.hex()],
+        [sys.executable, "-c", script, str(root), json.dumps(files), after.hex(), stage],
         cwd=Path(__file__).parent.parent,
         capture_output=True,
         timeout=15,
@@ -346,12 +359,18 @@ MemoryStore(root,files).commit("notes",digest((root/"notes.md").read_bytes()),af
     assert result.returncode == 73, result.stderr
     store = MemoryStore(root, files)
     record = store.pending()
-    assert record and note.read_bytes() == after
-    journal = (root / CONTROL / "audit.jsonl").read_bytes()
+    applied = stage == "notes.md"
+    assert record and note.read_bytes() == (after if applied else before)
+    audit = root / CONTROL / "audit.jsonl"
+    journal = audit.read_bytes() if audit.exists() else b""
     assert "pending receipt" in store.status()
-    store.recover(record["id"])
-    assert note.read_bytes() == (after if mode == "append" else before)
-    assert (root / CONTROL / "audit.jsonl").read_bytes().startswith(journal)
+    # Roll forward: keep the confirmed revision if written, otherwise leave the note as is.
+    result = store.recover(record["id"])
+    assert ("confirmed revision kept" if applied else "change was not applied") in result
+    assert note.read_bytes() == (after if applied else before)
+    assert audit.read_bytes().startswith(journal)
+    outcome = "recovered-applied" if applied else "recovered-unapplied"
+    assert f'"outcome":"{outcome}"' in audit.read_text()
     assert store.pending() is None and before.decode() in store.backup_texts()
     with pytest.raises(CapabilityError):
         store.recover(record["id"])

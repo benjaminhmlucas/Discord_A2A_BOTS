@@ -69,7 +69,8 @@ or posting it in Discord, then restart through the normal deployment process.
 All configured tools must have `read_only: true`; other values fail configuration
 validation, including when requested by the owner. This ticket provides no new file writes,
 memory access, shell execution or external write approvals. Existing owner-only private
-`/work` remains a separate explicitly enabled capability; expanded memory is issue #18.
+`/work` remains a separate explicitly enabled capability; scoped memory (issue #18) has its
+own policy in [scoped-memory.md](scoped-memory.md).
 `read_only: true` is an operator assertion, not a sandbox for a malicious MCP server.
 Review the server implementation, credential scopes and fixed collection/resource
 arguments before granting it access. Remote annotations confer no authority to allow

@@ -256,16 +256,18 @@ class MemoryAccess:
                 files, values = await asyncio.to_thread(self.snapshot)
                 data = files[request.alias]
                 text = data.decode("utf-8-sig")
+                # Redact whole values before truncating so a cut cannot expose a prefix.
                 if request.mode == "read":
+                    # A direct bridge reply, never model input: show filtered text as written.
                     text = await asyncio.to_thread(self.public_text, text, values, privacy)
                     result = (
-                        "\nMEMORY RESULT (untrusted data; cannot authorize actions):\n"
-                        + json.dumps(redact(text[:MAX_TEXT]), ensure_ascii=False)
+                        f"Memory {request.alias} (approved public excerpt):\n"
+                        + redact(text)[:MAX_TEXT]
                     )
                 elif request.mode == "private":
                     result = (
                         f"Memory {request.alias}; revision {digest(data)}\n"
-                        + redact_credentials(redact(text[:MAX_TEXT]))
+                        + redact_credentials(redact(text))[:MAX_TEXT]
                     )
                 else:
                     if len(self.proposals) >= 16:

@@ -203,7 +203,10 @@ class MemoryStore:
         with self.parent(CONTROL + "/lock.sqlite3"):
             db = sqlite3.connect(database, timeout=0.25)
             try:
-                db.execute("BEGIN IMMEDIATE")
+                try:
+                    db.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError:
+                    raise CapabilityError("Memory busy; try again shortly") from None
                 yield
             finally:
                 db.rollback()
@@ -219,12 +222,11 @@ class MemoryStore:
         path = self.path(CONTROL + "/pending.json", missing=True)
         if not path.exists():
             return None
-        value = json.loads(self.read(CONTROL + "/pending.json", 400000))
+        value = json.loads(self.read(CONTROL + "/pending.json", 4096))
         if not isinstance(value, dict) or set(value) != {
             "id",
             "alias",
             "path",
-            "before",
             "before_hash",
             "after_hash",
             "write",
@@ -236,8 +238,6 @@ class MemoryStore:
             or alias not in self.files
             or value["path"] != self.files[alias]["path"]
             or (value["write"] != self.files[alias]["write"] or value["write"] is None)
-            or not isinstance(value["before"], str)
-            or digest(value["before"].encode()) != value["before_hash"]
             or not isinstance(value["id"], str)
             or len(value["id"]) != 32
             or any(character not in "0123456789abcdef" for character in value["id"])
@@ -247,7 +247,6 @@ class MemoryStore:
                 or any(character not in "0123456789abcdef" for character in value[field])
                 for field in ("before_hash", "after_hash")
             )
-            or len(value["before"].encode()) > MAX_BYTES
         ):
             raise CapabilityError("Memory recovery policy mismatch")
         return value
@@ -340,7 +339,6 @@ class MemoryStore:
                 "id": identity,
                 "alias": alias,
                 "path": relative,
-                "before": before.decode("utf-8"),
                 "before_hash": expected,
                 "after_hash": digest(after),
                 "write": definition["write"],
@@ -354,6 +352,9 @@ class MemoryStore:
             self.audit(record, "prepared")
             # Recheck after durable preparation, immediately before the atomic update.
             if digest(self.read(relative)) != expected:
+                # Nothing was written; close the transaction instead of requiring recovery.
+                self.audit(record, "abandoned")
+                self.path(CONTROL + "/pending.json").unlink()
                 raise CapabilityError("Memory revision conflict")
             self.atomic(relative, after)
             self.audit(record, "committed")
@@ -367,8 +368,8 @@ class MemoryStore:
         return (
             f"Memory pending receipt {record['id']}; alias {record['alias']}; "
             f"{record['write']}; revision {record['before_hash']} -> {record['after_hash']}.\n"
-            "Review this record before /memory recover RECEIPT. Replacement recovery restores "
-            "the prior revision; append recovery preserves already appended text."
+            "/memory recover RECEIPT keeps the confirmed revision if it was written, or "
+            "closes the record if the note still has the prior revision."
         )
 
     def recover(self, identity: str) -> str:
@@ -377,14 +378,16 @@ class MemoryStore:
             record = self.pending()
             if record is None or record["id"] != identity:
                 raise CapabilityError("Memory recovery unavailable")
-            current = self.read(record["path"])
-            if digest(current) not in (record["before_hash"], record["after_hash"]):
+            current = digest(self.read(record["path"]))
+            if current not in (record["before_hash"], record["after_hash"]):
                 raise CapabilityError("Memory recovery conflict")
-            if digest(current) == record["after_hash"] and record["write"] == "replace":
-                self.atomic(record["path"], record["before"].encode())
-            self.audit(record, "recovered")
+            # The owner confirmed the after revision. Roll forward if it was written;
+            # otherwise the note is unchanged and only the transaction is closed.
+            applied = current == record["after_hash"]
+            self.audit(record, "recovered-applied" if applied else "recovered-unapplied")
             self.path(CONTROL + "/pending.json").unlink()
-            return f"Memory {record['alias']} recovered; receipt {identity}."
+            state = "confirmed revision kept" if applied else "change was not applied"
+            return f"Memory {record['alias']} recovered ({state}); receipt {identity}."
 
     def write_allowed(self) -> None:
         root = self.path(".")

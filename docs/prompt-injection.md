@@ -108,5 +108,6 @@ tools. It is not a per-command approval system, and this ticket does not prevent
 untrusted documents from influencing actions already permitted inside that mode.
 Keep it disabled unless the owner accepts those capabilities; a compromised owner
 account is outside this boundary. The native tool-window limitation remains
-documented in the README. Future tools and memory access need their own
-authorization policy and acceptance checks before enablement.
+documented in the README. Tools and memory access each have their own authorization
+policy ([scoped capabilities](scoped-capabilities.md), [scoped memory](scoped-memory.md))
+and need acceptance checks before enablement.

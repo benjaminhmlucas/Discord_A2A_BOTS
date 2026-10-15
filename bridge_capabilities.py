@@ -204,7 +204,11 @@ class Capabilities:
             self.active_secrets.clear()
             self.refresh_secrets()
             if isinstance(request, MemoryRequest):
-                text = await self.memory.execute(request, privacy, self.redact)
+                try:
+                    text = await self.memory.execute(request, privacy, self.redact)
+                except OSError:
+                    # A missing or access-denied memory file, never a network failure.
+                    raise CapabilityError("Memory file unavailable") from None
                 outcome = "completed"
                 return text
             values = request.arguments

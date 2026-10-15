@@ -64,6 +64,9 @@ require the configured owner. `public`/`private` select delivery permissions;
 PRIVATE markers supply the existing literal DLP policy. Public excerpts are filtered
 against current privacy sources, all configured aliases and retained private-marked
 backups; credential-shaped values and configured environment credentials are masked.
+Masking runs on the whole note before the 12000-character excerpt limit, so the cut
+cannot expose part of a value. Public excerpts are posted as plain text under a
+`Memory ALIAS (approved public excerpt):` heading; no model reads them.
 Owner-private reads can show PRIVATE-marked text but still mask known credentials.
 Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.
@@ -90,22 +93,33 @@ before editing these files elsewhere, then read the newest revision before propo
 another write. This is revision conflict detection, not a filesystem compare-and-swap.
 
 The private `.botbridge-memory` directory retains preimages, immutable receipts,
-a pending record and an append-only metadata journal. Audit records contain alias,
-receipt, hashes, timestamp and outcome, never note contents or credentials. Backups
-retain PRIVATE markers so replacing a note does not erase the deny set for its old
-private values. At 64 receipts/backups or approximately 1 MiB of audit metadata,
-new writes stop until the operator archives records while preserving the journal.
-Nothing silently prunes these append-only records.
+a pending record and an append-only metadata journal. Receipts and the pending record
+hold only the alias, path, write mode and before/after hashes. Audit records contain
+alias, receipt, hashes, timestamp and outcome (`prepared`, `committed`, `abandoned`,
+`recovered-applied` or `recovered-unapplied`), never note contents or credentials.
+Preimage backups retain PRIVATE markers so replacing a note does not erase the deny
+set for its old private values. At 64 receipts/backups or approximately 1 MiB of audit
+metadata, new writes stop until the operator archives records while preserving the
+journal. Nothing silently prunes these append-only records.
 
-A failed/interrupted write can require recovery; later commits are refused while
-a pending record exists. The owner inspects `status` and explicitly selects
-`recover RECEIPT`. Replace recovery restores the preimage only if the current
-revision still matches the recorded before/after hashes. Append recovery preserves
-already appended text. Recovery refuses unrelated external revisions that it observes;
-the same external-editor coordination requirement applies during recovery.
+If the final revision check finds an external edit, nothing is written: the commit is
+journaled as `abandoned`, its pending record is closed and the owner sees a revision
+conflict. Only an interrupted commit (for example, a crash) leaves a pending record;
+later commits are refused until it is resolved. The owner inspects `status` and
+explicitly selects `recover RECEIPT`. Recovery rolls forward: if the note already has
+the confirmed revision it is kept (`recovered-applied`); if the note still has the
+prior revision, the change was not applied and only the record is closed
+(`recovered-unapplied`). Recovery never rewrites the note and refuses any other
+revision; an operator must then inspect the note, receipt and preimage and resolve the
+pending record locally. The same external-editor coordination requirement applies.
 Atomic write/recovery work finishes before cancellation releases the request's lock;
 a Discord timeout can occur after the file changed. Inspect the private revision
 and receipt before retrying; a used confirmation cannot be replayed.
+
+Memory refusals reply with a fixed reason, for example `Memory revision conflict`,
+`Memory confirmation unavailable`, `Memory file unavailable` (missing or access-denied
+file) or `Memory busy; try again shortly` (another bridge writer holds the root lock).
+These reasons never include note text, paths or credentials.
 
 ## AC evidence and deployment
 

@@ -3,7 +3,6 @@
 import os
 import json
 import ctypes
-import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -185,28 +184,34 @@ def pending_record(root, files):
         "id": "a" * 32,
         "alias": "notes",
         "path": "notes.md",
-        "before": before.decode(),
         "before_hash": io.digest(before),
         "after_hash": io.digest(b"after"),
         "write": "replace",
     }
 
 
-def test_recovery_record_validation_conflicts_and_prewrite_recovery(tmp_path):
+def journal_outcomes(root):
+    lines = (root / io.CONTROL / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line)["outcome"] for line in lines]
+
+
+def test_recovery_record_validation_conflicts_and_roll_forward(tmp_path):
     root, files, store = store_for(tmp_path)
     with store.lock():
         pass
+    before = (root / "notes.md").read_bytes()
     record = pending_record(root, files)
     pending = root / io.CONTROL / "pending.json"
     for value in [
         [],
         {},
+        {**record, "before": before.decode()},
         {**record, "alias": []},
         {**record, "alias": "unknown"},
         {**record, "path": "../outside.md"},
         {**record, "write": None},
-        {**record, "before": 1},
-        {**record, "before_hash": "f" * 64},
+        {**record, "write": "append"},
+        {**record, "before_hash": "g" * 64},
         {**record, "id": 1},
         {**record, "id": "x" * 32},
         {**record, "after_hash": 1},
@@ -216,7 +221,11 @@ def test_recovery_record_validation_conflicts_and_prewrite_recovery(tmp_path):
         pending.write_text(json.dumps(value), encoding="utf-8")
         with pytest.raises(CapabilityError):
             store.pending()
+    pending.write_text(json.dumps({**record, "path": "x" * 5000}), encoding="utf-8")
+    with pytest.raises(CapabilityError, match="denied"):
+        store.pending()
     pending.write_text(json.dumps(record), encoding="utf-8")
+    assert "keeps the confirmed revision" in store.status()
     with pytest.raises(CapabilityError, match="recovery required"):
         store.commit("notes", record["before_hash"], b"after")
     with pytest.raises(CapabilityError, match="unavailable"):
@@ -224,16 +233,24 @@ def test_recovery_record_validation_conflicts_and_prewrite_recovery(tmp_path):
     (root / "notes.md").write_bytes(b"external")
     with pytest.raises(CapabilityError, match="conflict"):
         store.recover(record["id"])
-    (root / "notes.md").write_bytes(record["before"].encode())
-    store.recover(record["id"])
-    assert (root / "notes.md").read_bytes() == record["before"].encode()
+    assert store.pending() == record
+    # Interrupted before replacement: the note is unchanged and the record is closed.
+    (root / "notes.md").write_bytes(before)
+    assert "change was not applied" in store.recover(record["id"])
+    assert (root / "notes.md").read_bytes() == before and store.pending() is None
+    # Interrupted after replacement: the confirmed revision is kept, never rolled back.
+    pending.write_text(json.dumps(record), encoding="utf-8")
+    (root / "notes.md").write_bytes(b"after")
+    assert "confirmed revision kept" in store.recover(record["id"])
+    assert (root / "notes.md").read_bytes() == b"after" and store.pending() is None
+    assert journal_outcomes(root) == ["recovered-unapplied", "recovered-applied"]
 
 
 def test_scoped_write_policy_capacity_and_real_sqlite_lock(tmp_path):
     root, files, store = store_for(tmp_path)
     before = (root / "notes.md").read_bytes()
     with store.lock():
-        with pytest.raises(sqlite3.OperationalError):
+        with pytest.raises(CapabilityError, match="busy"):
             with io.MemoryStore(root, files).lock():
                 pass
     for name in ("AGENTS.md", "LIVE_STATE.md", "SESSION_LOG.md"):
@@ -280,4 +297,6 @@ def test_external_edit_during_durable_preparation_is_not_overwritten(tmp_path):
     ):
         store.commit("notes", io.digest(before), b"new")
     assert (root / "notes.md").read_bytes() == b"external edit"
-    assert store.pending() is not None
+    # The conflict was detected before writing, so no recovery is left pending.
+    assert store.pending() is None
+    assert journal_outcomes(root) == ["prepared", "abandoned"]

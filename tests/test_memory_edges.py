@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-from bridge_memory import MemoryAccess
+from bridge_capabilities import Capabilities
+from bridge_memory import MAX_TEXT, MemoryAccess
 from bridge_memory_io import MemoryStore, CONTROL, digest
 from bridge_privacy import Privacy
 from bridge_http import CapabilityError
@@ -63,7 +64,10 @@ def test_cancellation_waits_for_actual_atomic_work_to_finish(tmp_path, mode):
     author = owner_dm()
     message = Message(1, "", author.dm, author)
     entered, release = threading.Event(), threading.Event()
-    original_replace = os.replace
+    # Pause the transaction's final filesystem step: the note replacement for a commit,
+    # and closing the pending record for a roll-forward recovery.
+    operation, suffix = ("replace", "notes.md") if mode == "commit" else ("unlink", "pending.json")
+    original = getattr(os, operation)
     before = (root / "notes.md").read_bytes()
 
     async def execute(command):
@@ -84,20 +88,21 @@ def test_cancellation_waits_for_actual_atomic_work_to_finish(tmp_path, mode):
             (root / "notes.md").write_bytes(b"after")
             command = "/memory recover " + record["id"]
 
-        def delayed(source, destination, **options):
-            if str(destination).endswith("notes.md"):
+        def delayed(*args, **options):
+            if str(args[-1]).endswith(suffix):
                 entered.set()
                 assert release.wait(3)
-            return original_replace(source, destination, **options)
+            return original(*args, **options)
 
-        with patch.object(os, "replace", delayed):
+        with patch.object(os, operation, delayed):
             task = asyncio.create_task(execute(command))
             assert await asyncio.to_thread(entered.wait, 2)
             task.cancel()
             release.set()
             with pytest.raises(asyncio.CancelledError):
                 await task
-        assert (root / "notes.md").read_bytes() == (b"after" if mode == "commit" else before)
+        # Both transactions completed despite cancellation; recovery kept the confirmed text.
+        assert (root / "notes.md").read_bytes() == b"after"
         assert memory.store.pending() is None
         if mode == "recover":
             record = pending_record(root, config["memory"]["files"])
@@ -176,12 +181,6 @@ def test_reads_reject_real_file_replacement_growth_and_audit_hardlinks(tmp_path)
         pass
     assert store.pending() is None
     record = pending_record(root, store.files)
-    record["before"] = "x" * 65537
-    record["before_hash"] = digest(record["before"].encode())
-    (root / CONTROL / "pending.json").write_text(json.dumps(record), encoding="utf-8")
-    with pytest.raises(CapabilityError):
-        store.pending()
-    (root / CONTROL / "pending.json").unlink()
 
     def hardlink_audit(path, *args, **kwargs):
         descriptor = real_open(path, *args, **kwargs)
@@ -200,3 +199,54 @@ def test_absent_control_pending(tmp_path):
     root = tmp_path / "memory"
     populate(root)
     assert MemoryStore(root, memory_config(root)["memory"]["files"]).pending() is None
+
+
+@pytest.mark.parametrize("command", ["/memory read public", "/memory private notes"])
+def test_excerpt_limit_cannot_expose_a_partial_credential(tmp_path, command):
+    root = tmp_path / "memory"
+    populate(root)
+    config = memory_config(root)
+    canary = "synthetic-credential-canary"
+    text = "a" * (MAX_TEXT - 10) + canary
+    for name in ("public.md", "notes.md"):
+        (root / name).write_text(text, encoding="utf-8")
+    author = owner_dm()
+    message = Message(1, "", author.dm, author)
+
+    async def scenario():
+        with patch.dict(os.environ, {"BOTBRIDGE_MEMORY_TEST_KEY": canary}):
+            capabilities = Capabilities(config, lambda _: None)
+            request = capabilities.authorize(command, message, C)
+            return await capabilities.execute(request, Privacy(root))
+
+    result = asyncio.run(scenario())
+    # Redaction runs on the whole note before the 12000-character excerpt limit.
+    assert canary[:10] not in result and "a" * (MAX_TEXT - 10) in result
+
+
+def test_missing_memory_file_reports_a_fixed_memory_reason(tmp_path):
+    root = tmp_path / "memory"
+    populate(root)
+    (root / "public.md").unlink()
+
+    async def provider(*args, **options):
+        raise AssertionError("memory commands never call a provider")
+
+    async def scenario():
+        bridge = Bridge(
+            Client(C),
+            C,
+            provider,
+            lambda _: None,
+            root=tmp_path,
+            memory_dir=root,
+            config=memory_config(root),
+        )
+        channel = Channel()
+        await bridge.handle(Message(1, "<@101> /memory read public", channel))
+        assert channel.sent[-1][0].content == (
+            "Bridge: memory request refused (Memory file unavailable)."
+        )
+        assert bridge.health["last_error"] == "CapabilityError" and not bridge.lock.locked()
+
+    asyncio.run(scenario())
