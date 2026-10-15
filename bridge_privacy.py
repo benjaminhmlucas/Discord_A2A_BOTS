@@ -22,11 +22,17 @@ def private_values(text: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+WEBHOOK = re.compile(r"https://discord(?:app)?\.com/api/webhooks/\S+", re.I)
+API_KEY = re.compile(r"\bAIza[\w-]{30,}\b")
+TOKEN = re.compile(r"\b[\w-]{23,30}\.[\w-]{6}\.[\w-]{25,}\b")
 CREDENTIAL_PATTERNS = (
-    (re.compile(r"https://discord(?:app)?\.com/api/webhooks/\S+", re.I), "[private webhook]"),
-    (re.compile(r"\bAIza[\w-]{30,}\b"), "[private key]"),
-    (re.compile(r"\b[\w-]{23,30}\.[\w-]{6}\.[\w-]{25,}\b"), "[private token]"),
+    (WEBHOOK, "[private webhook]"),
+    (API_KEY, "[private key]"),
+    (TOKEN, "[private token]"),
 )
+# WEBHOOK and API_KEY run to the end of their character run, so a match starting inside
+# one ends where it does; plain matching finds them all without quadratic rescanning.
+RUN_PATTERNS = (WEBHOOK, API_KEY)
 
 
 def redact_credentials(text: str) -> str:
@@ -62,11 +68,14 @@ def redact_spans(
         if value.split()
     ]
     patterns += [re.compile(re.escape(secret)) for secret in filter(None, credentials)]
-    patterns += [pattern for pattern, _ in CREDENTIAL_PATTERNS]
+    # A second token can start inside the first token's last segment and extend past it.
+    patterns.append(TOKEN)
     for pattern in patterns:
         # A lookahead reports every start position, so overlapping occurrences count.
         overlapping = re.compile(f"(?=({pattern.pattern}))", pattern.flags)
         spans.extend(match.span(1) for match in overlapping.finditer(text))
+    for run_pattern in RUN_PATTERNS:
+        spans.extend(match.span() for match in run_pattern.finditer(text))
     output: list[str] = []
     position = 0
     for start, end in sorted(spans):

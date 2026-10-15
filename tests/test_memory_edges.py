@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -541,3 +542,20 @@ def test_span_redaction_covers_overlaps_glued_tokens_and_owner_text():
         "<!--PRIVATE:START-->v<!--PRIVATE:END--> " + token, (), ("M" * 20,), markers=False
     )
     assert owner == "<!--PRIVATE:START-->v<!--PRIVATE:END--> [private]"
+
+
+def test_span_redaction_masks_every_credential_shape_including_nested_tokens():
+    # A second token starting inside the first token's last segment is also masked.
+    nested = "x" * 23 + "." + "y" * 6 + "." + "a-" + "c" * 23 + "." + "d" * 6 + "." + "e" * 25
+    assert redact_spans(nested, (), ()) == "[private]"
+    key = "AIza" + "k" * 35
+    hook = WEBHOOK + "123/abc"
+    assert redact_spans(f"k {key} h {hook} end", (), ()) == "k [private] h [private] end"
+    # Long runs of key/webhook prefixes stay linear and are fully masked. The bound is
+    # generous: quadratic rescanning of a 64 KiB run took several seconds per call.
+    started = time.perf_counter()
+    assert redact_spans("-AIza" * 13107, (), ()) == "-[private]"
+    assert redact_spans("AIza" + "-AIza" * 13106, (), ()) == "[private]"
+    run = (WEBHOOK * 2000)[:65536]
+    assert redact_spans(run, (), ()) == "[private]"
+    assert time.perf_counter() - started < 2
