@@ -76,17 +76,26 @@ def test_dns_answers_all_checked():
             for hosts, allowed in [
                 ([], False),
                 (["8.8.8.8"], True),
+                (["2606:4700:4700::1111"], True),
+                (["::ffff:8.8.8.8"], True),
                 (["8.8.8.8", "127.0.0.1"], False),
                 (["::127.0.0.1"], False),
                 (["::169.254.169.254"], False),
                 (["8.8.8.8", "4000::1"], False),
             ]:
                 answers = [
-                    (socket.AF_INET, socket.SOCK_STREAM, 6, "", (host, 443)) for host in hosts
+                    (
+                        socket.AF_INET6 if ":" in host else socket.AF_INET,
+                        socket.SOCK_STREAM,
+                        6,
+                        "",
+                        (host, 443, 0, 0) if ":" in host else (host, 443),
+                    )
+                    for host in hosts
                 ]
                 with patch.object(loop, "getaddrinfo", dns):
                     if allowed:
-                        assert (await resolver.resolve("test.invalid", 443))[0]["host"] == "8.8.8.8"
+                        assert (await resolver.resolve("test.invalid", 443))[0]["host"] == hosts[0]
                     else:
                         with pytest.raises(CapabilityError):
                             await resolver.resolve("test.invalid", 443)

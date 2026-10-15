@@ -19,6 +19,7 @@ class StreamingServer(FixtureServer):
         self.hold = hold
         self.release = asyncio.Event()
         self.open_streams = 0
+        self.eof_writes = 0
 
     async def __aexit__(self, *args):
         self.release.set()
@@ -44,8 +45,11 @@ class StreamingServer(FixtureServer):
                 for chunk in chunks:
                     await response.write(chunk)
                     await asyncio.sleep(0.003)
-                if self.hold:
-                    await self.release.wait()
+            # Hold the producer even if the client closes after reading a final CR.
+            if self.hold:
+                await self.release.wait()
+            with suppress(ConnectionResetError):
+                self.eof_writes += 1
                 await response.write_eof()
         finally:
             self.open_streams -= 1
@@ -80,6 +84,7 @@ def test_empty_primers_chunk_boundaries_and_result_before_eof(legacy, newline):
             )
             assert await client.call("read_example", {}) == "public é answer"
             assert server.open_streams == 2  # Neither server handler reached EOF.
+            assert server.eof_writes == 0 and not server.release.is_set()
             assert not client.session and client.cancelled_request is None
 
     asyncio.run(scenario())
