@@ -435,3 +435,28 @@ def test_token_shaped_value_split_by_a_private_value_is_masked(tmp_path):
     output = asyncio.run(scenario())
     assert "Bot token: [private token]" in output
     assert "MTIzNDU2" not in output and "abcdefghijklmnop" not in output
+
+
+@pytest.mark.parametrize("kind", ["shaped", "configured"])
+def test_private_line_containing_a_credential_stays_private(tmp_path, kind):
+    """Masking credentials first must not stop the surrounding PRIVATE line matching."""
+    root = tmp_path / "memory"
+    populate(root)
+    shaped = ".".join(["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GqzAbc", "abcdefghijklmnopqrstuvwxyz0123"])
+    secret = shaped if kind == "shaped" else "synthetic-configured-credential"
+    line = "SYNTHETIC PIN 4471 key " + secret
+    (root / "private.md").write_text(
+        f"<!--PRIVATE:START-->{line}<!--PRIVATE:END-->", encoding="utf-8"
+    )
+    (root / "public.md").write_bytes(("Facts\n" + line).encode())  # Exact LF on all platforms.
+    config = memory_config(root)
+
+    async def scenario():
+        with patch.dict(os.environ, {"BOTBRIDGE_MEMORY_TEST_KEY": secret}):
+            capabilities = Capabilities(config, lambda _: None)
+            request = capabilities.authorize("/memory read public", Message(1, "", Channel()), C)
+            return await capabilities.execute(request, Privacy(root))
+
+    result = asyncio.run(scenario())
+    assert "Facts\n[private]" in result
+    assert "SYNTHETIC PIN 4471" not in result and secret[:10] not in result

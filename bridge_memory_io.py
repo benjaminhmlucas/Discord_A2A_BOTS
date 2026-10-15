@@ -210,7 +210,9 @@ class MemoryStore:
                 try:
                     db.execute("BEGIN IMMEDIATE")
                 except sqlite3.OperationalError:
-                    raise CapabilityError("Memory busy; try again shortly") from None
+                    raise CapabilityError(
+                        "Memory busy; another bridge writer holds the lock"
+                    ) from None
                 yield
             finally:
                 db.rollback()

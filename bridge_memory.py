@@ -213,8 +213,15 @@ class MemoryAccess:
             values.extend(private_values(text))
         return files, tuple(sorted(set(values), key=len, reverse=True))
 
-    def public_text(self, text: str, values: tuple[str, ...], privacy: Any) -> str:
-        return str(privacy._filter(text, (*privacy.refresh(), *values)))
+    def public_text(
+        self, text: str, values: tuple[str, ...], privacy: Any, redact: Callable[[str], str]
+    ) -> str:
+        # Credentials are masked in `text` before this runs, so a PRIVATE value that
+        # contains a credential must also be matched in its masked form.
+        raw = (*privacy.refresh(), *values)
+        masked = (redact_credentials(redact(value)) for value in raw)
+        candidates = tuple(sorted({*raw, *masked}, key=len, reverse=True))
+        return str(privacy._filter(redact_credentials(redact(text)), candidates))
 
     async def execute(
         self, request: MemoryRequest, privacy: Any, redact: Callable[[str], str]
@@ -263,11 +270,10 @@ class MemoryAccess:
                 text = data.decode("utf-8-sig")
                 # Redact whole values before truncating so a cut cannot expose a prefix.
                 if request.mode == "read":
-                    # Mask configured and credential-shaped values first: PRIVATE-value
-                    # filtering could otherwise split one so its exact match or shape no
-                    # longer applies. A direct bridge reply, never model input.
-                    masked = redact_credentials(redact(text))
-                    text = await asyncio.to_thread(self.public_text, masked, values, privacy)
+                    # Mask configured and credential-shaped values before PRIVATE-value
+                    # filtering, which could otherwise split one so its exact match or
+                    # shape no longer applies. A direct bridge reply, never model input.
+                    text = await asyncio.to_thread(self.public_text, text, values, privacy, redact)
                     result = (
                         f"Memory {request.alias} (approved public excerpt):\n"
                         + redact(text)[:MAX_TEXT]

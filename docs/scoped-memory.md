@@ -73,8 +73,10 @@ against current privacy sources, all configured aliases and retained private-mar
 backups; credential-shaped values and configured environment credentials are masked.
 Credential masking runs on the whole note before PRIVATE-value filtering and before the
 12000-character excerpt limit, so neither a filtered substring nor the cut can expose
-part of a value. Public excerpts are posted as plain text under a
-`Memory ALIAS (approved public excerpt):` heading; no model reads them.
+part of a value. Each PRIVATE value is matched both as written and with its own
+credentials masked, so a private line that contains a credential stays private. Public
+excerpts are posted as plain text under a `Memory ALIAS (approved public excerpt):`
+heading; no model reads them.
 Owner-private reads can show PRIVATE-marked text but still mask known credentials.
 Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.
@@ -117,10 +119,11 @@ journaled as `abandoned`, its pending record is closed and the owner sees a revi
 conflict. Any other failure after preparation leaves a pending record, even if the note
 was already replaced; later commits are refused until it is resolved. Besides a crash,
 this includes a filesystem write error, such as Windows refusing the note replacement
-while another bot process briefly reads the note. After any refused commit, check
-`/memory status` (refused as busy while another writer holds the lock), then
-explicitly select `recover RECEIPT`. Recovery rolls
-forward: if the note already has the confirmed revision it is kept
+while a privacy scan or read in any bot process briefly has the note open. A refused
+commit uses up its confirmation; propose the change again rather than retrying the
+same token. After any refused commit, check `/memory status` (refused as busy while
+another writer holds the lock), then explicitly select `recover RECEIPT`. Recovery
+rolls forward: if the note already has the confirmed revision it is kept
 (`recovered-applied`); if the note still has the prior revision, the change was not
 applied and only the record is closed (`recovered-unapplied`). Recovery never rewrites
 the note and refuses any other revision; an operator must then inspect the note, receipt
@@ -134,11 +137,10 @@ Messages from other guild channels, and DMs from anyone but the owner, are ignor
 eligible message whose command the policy does not allow (a write command in the public
 channel, a non-owner private request, an unknown alias or malformed arguments) gets the
 generic reply `Bridge: capability request denied; check configuration and command
-arguments.` An allowed command that then fails replies with a
-fixed reason, for example `Memory revision conflict`, `Memory confirmation unavailable`,
-`Memory file unavailable` (missing or access-denied file) or `Memory busy; try again
-shortly` (another bridge writer holds the root lock). These reasons never include note
-text, paths or credentials.
+arguments.` An allowed command that then fails replies with a fixed reason, for example
+`Memory revision conflict`, `Memory confirmation unavailable`, `Memory file unavailable`
+(missing or access-denied file) or `Memory busy; another bridge writer holds the lock`.
+These reasons never include note text, paths or credentials.
 
 ## AC evidence and deployment
 
