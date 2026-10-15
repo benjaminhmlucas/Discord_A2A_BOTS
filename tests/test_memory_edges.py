@@ -399,3 +399,39 @@ def test_credential_containing_a_private_value_is_masked_whole(tmp_path):
     result = asyncio.run(scenario())
     assert "credprefix" not in result and "credsuffix" not in result
     assert "[REDACTED CREDENTIAL]" in result
+
+
+def test_token_shaped_value_split_by_a_private_value_is_masked(tmp_path):
+    """A credential-shaped value that is not configured must not leak in pieces."""
+    root = tmp_path / "memory"
+    populate(root)
+    # Synthetic Discord-token shape, assembled at runtime so the release scan of this
+    # source never sees a credential-shaped literal.
+    token = ".".join(["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GqzAbc", "abcdefghijklmnopqrstuvwxyz0123"])
+    (root / "public.md").write_text("Bot token: " + token, encoding="utf-8")
+    # Every non-empty line of a PRIVATE block is matched, so a short line like "qz"
+    # appears inside the token and could split it before credential masking.
+    (root / "private.md").write_text(
+        "<!--PRIVATE:START-->SYNTHETIC PRIVATE VALUE\nqz<!--PRIVATE:END-->", encoding="utf-8"
+    )
+
+    async def provider(*args, **options):
+        raise AssertionError("memory commands never call a provider")
+
+    async def scenario():
+        bridge = Bridge(
+            Client(C),
+            C,
+            provider,
+            lambda _: None,
+            root=tmp_path,
+            memory_dir=root,
+            config=memory_config(root),
+        )
+        channel = Channel()
+        await bridge.handle(Message(1, "<@101> /memory read public", channel))
+        return "\n".join(message.content for message, _ in channel.sent)
+
+    output = asyncio.run(scenario())
+    assert "Bot token: [private token]" in output
+    assert "MTIzNDU2" not in output and "abcdefghijklmnop" not in output

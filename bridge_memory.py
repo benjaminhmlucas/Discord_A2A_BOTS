@@ -263,10 +263,11 @@ class MemoryAccess:
                 text = data.decode("utf-8-sig")
                 # Redact whole values before truncating so a cut cannot expose a prefix.
                 if request.mode == "read":
-                    # Mask configured credentials first: PRIVATE-value filtering could
-                    # otherwise split a credential so its exact match no longer applies.
-                    # A direct bridge reply, never model input: show filtered text as written.
-                    text = await asyncio.to_thread(self.public_text, redact(text), values, privacy)
+                    # Mask configured and credential-shaped values first: PRIVATE-value
+                    # filtering could otherwise split one so its exact match or shape no
+                    # longer applies. A direct bridge reply, never model input.
+                    masked = redact_credentials(redact(text))
+                    text = await asyncio.to_thread(self.public_text, masked, values, privacy)
                     result = (
                         f"Memory {request.alias} (approved public excerpt):\n"
                         + redact(text)[:MAX_TEXT]
