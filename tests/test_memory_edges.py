@@ -35,9 +35,7 @@ def test_private_authorization_root_mismatch_and_proposal_limits(tmp_path):
     message = Message(2, "", author.dm, author)
 
     async def execute(command, privacy=None):
-        return await memory.execute(
-            memory.authorize(command, message, C), privacy or Privacy(root), lambda v: v
-        )
+        return await memory.execute(memory.authorize(command, message, C), privacy or Privacy(root))
 
     async def scenario():
         with pytest.raises(CapabilityError, match="privacy source"):
@@ -75,9 +73,7 @@ def test_cancellation_waits_for_actual_atomic_work_to_finish(tmp_path, mode):
     before = (root / "notes.md").read_bytes()
 
     async def execute(command):
-        return await memory.execute(
-            memory.authorize(command, message, C), Privacy(root), lambda v: v
-        )
+        return await memory.execute(memory.authorize(command, message, C), Privacy(root))
 
     async def scenario():
         if mode == "commit":
@@ -529,3 +525,19 @@ def test_span_redaction_merges_matches_and_fails_closed():
     for malformed in ("<!--PRIVATE:START--> open", "x <!-- PRIVATE:END -->"):
         with pytest.raises(RuntimeError, match="Malformed"):
             redact_spans(malformed, (), ())
+
+
+def test_span_redaction_covers_overlaps_glued_tokens_and_owner_text():
+    # Overlapping occurrences of one value or credential leave no fragment.
+    assert redact_spans("x k1k1k y", ("k1k",), ()) == "x [private] y"
+    assert redact_spans("ababa", (), ("aba",)) == "[private]"
+    # A token glued to a private value forms its shape only after redaction.
+    glued = "zzzzz" + "D" * 28 + "." + "E" * 6 + "." + "F" * 27
+    result = redact_spans(glued, ("zzzzz",), ())
+    assert "D" * 10 not in result and "F" * 10 not in result
+    # Owner-private text keeps PRIVATE blocks but masks credentials as whole spans.
+    token = ".".join(["M" * 24, "GabcDE", "x" * 30])
+    owner = redact_spans(
+        "<!--PRIVATE:START-->v<!--PRIVATE:END--> " + token, (), ("M" * 20,), markers=False
+    )
+    assert owner == "<!--PRIVATE:START-->v<!--PRIVATE:END--> [private]"

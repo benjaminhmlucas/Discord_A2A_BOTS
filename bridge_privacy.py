@@ -23,7 +23,7 @@ def private_values(text: str) -> tuple[str, ...]:
 
 
 CREDENTIAL_PATTERNS = (
-    (re.compile(r"(?i)(?:https://discord(?:app)?\.com/api/webhooks/)\S+"), "[private webhook]"),
+    (re.compile(r"https://discord(?:app)?\.com/api/webhooks/\S+", re.I), "[private webhook]"),
     (re.compile(r"\bAIza[\w-]{30,}\b"), "[private key]"),
     (re.compile(r"\b[\w-]{23,30}\.[\w-]{6}\.[\w-]{25,}\b"), "[private token]"),
 )
@@ -35,27 +35,38 @@ def redact_credentials(text: str) -> str:
     return text
 
 
-def redact_spans(text: str, values: tuple[str, ...], credentials: tuple[str, ...]) -> str:
+def redact_spans(
+    text: str, values: tuple[str, ...], credentials: tuple[str, ...], *, markers: bool = True
+) -> str:
     """Redact PRIVATE blocks, PRIVATE values and credentials found in the original text.
 
-    Every match is located in the unmodified text, then overlapping or adjacent matches
-    are merged and each merged range is replaced once. Sequential substitution cannot
-    be used here: one replacement can split or swallow part of another match, leaving
-    the rest of a private value or credential in the output.
+    Every match, including overlapping occurrences of the same value, is located in the
+    unmodified text; overlapping or adjacent matches are merged and each merged range is
+    replaced once. Sequential substitution cannot be used here: one replacement can
+    split or swallow part of another match, leaving the rest of a private value or
+    credential in the output. With markers=False (owner-private text), PRIVATE blocks
+    are left visible and only the supplied values and credentials are redacted.
     """
-    blocks = [match.span() for match in BLOCK.finditer(text)]
-    if any(not any(a <= t.start() and t.end() <= b for a, b in blocks) for t in TAG.finditer(text)):
-        raise RuntimeError("Malformed private text")
-    spans = list(blocks)
+    spans: list[tuple[int, int]] = []
+    if markers:
+        spans = [match.span() for match in BLOCK.finditer(text)]
+        if any(
+            not any(a <= t.start() and t.end() <= b for a, b in spans) for t in TAG.finditer(text)
+        ):
+            raise RuntimeError("Malformed private text")
     # Spaces/newlines and case variation should not bypass literal DLP. Blank values
     # would match the empty string everywhere, so they are skipped.
-    patterns = [r"\s+".join(map(re.escape, value.split())) for value in values if value.split()]
-    for value_pattern in patterns:
-        spans.extend(match.span() for match in re.finditer(value_pattern, text, re.I))
-    for secret in filter(None, credentials):
-        spans.extend(match.span() for match in re.finditer(re.escape(secret), text))
-    for credential_pattern, _ in CREDENTIAL_PATTERNS:
-        spans.extend(match.span() for match in credential_pattern.finditer(text))
+    patterns = [
+        re.compile(r"\s+".join(map(re.escape, value.split())), re.I)
+        for value in values
+        if value.split()
+    ]
+    patterns += [re.compile(re.escape(secret)) for secret in filter(None, credentials)]
+    patterns += [pattern for pattern, _ in CREDENTIAL_PATTERNS]
+    for pattern in patterns:
+        # A lookahead reports every start position, so overlapping occurrences count.
+        overlapping = re.compile(f"(?=({pattern.pattern}))", pattern.flags)
+        spans.extend(match.span(1) for match in overlapping.finditer(text))
     output: list[str] = []
     position = 0
     for start, end in sorted(spans):
@@ -64,7 +75,8 @@ def redact_spans(text: str, values: tuple[str, ...], credentials: tuple[str, ...
             output.append("[private]")
         position = max(position, end)
     output.append(text[position:])
-    return "".join(output)
+    # Text joined at a placeholder can newly form a credential shape; mask any that remain.
+    return redact_credentials("".join(output))
 
 
 class Privacy:

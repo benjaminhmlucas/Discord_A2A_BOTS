@@ -13,7 +13,7 @@ from typing import Any
 
 from bridge_authorization import eligible_sender, owner_memory_dm
 from bridge_http import CapabilityError
-from bridge_privacy import private_values, redact_credentials, redact_spans
+from bridge_privacy import private_values, redact_spans
 from bridge_memory_io import MemoryStore, digest
 
 ALIAS = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,31}\Z")
@@ -224,7 +224,6 @@ class MemoryAccess:
         self,
         request: MemoryRequest,
         privacy: Any,
-        redact: Callable[[str], str],
         credentials: tuple[str, ...] = (),
     ) -> str:
         # This dispatcher is only called after the runtime verified private delivery.
@@ -281,7 +280,7 @@ class MemoryAccess:
                 elif request.mode == "private":
                     result = (
                         f"Memory {request.alias}; revision {digest(data)}\n"
-                        + redact_credentials(redact(text))[:MAX_TEXT]
+                        + redact_spans(text, (), credentials, markers=False)[:MAX_TEXT]
                     )
                 else:
                     if len(self.proposals) >= 16:
@@ -307,7 +306,7 @@ class MemoryAccess:
                         f"Memory proposal {request.alias}; {self.files[request.alias]['write']}; "
                         f"revision {digest(data)} -> {digest(after)}; expires in {TTL}s.\n"
                         f"Confirm this exact change with /memory commit {token}\nPreview:\n"
-                        + redact_credentials(redact(request.arguments["text"]))
+                        + redact_spans(request.arguments["text"], (), credentials, markers=False)
                     )
             outcome = "completed"
             return result

@@ -322,7 +322,7 @@ def test_expired_wrong_bot_and_bad_proposals_never_mutate(tmp_path):
 
     async def execute(command, bot=C):
         request = memory.authorize(command, message, bot)
-        return await memory.execute(request, Privacy(root), lambda value: value)
+        return await memory.execute(request, Privacy(root))
 
     async def scenario():
         for text, expected in [("x", "f" * 64), ("<!--PRIVATE:START-->bad", digest(original))]:

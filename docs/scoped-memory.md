@@ -71,13 +71,15 @@ require the configured owner. `public`/`private` select delivery permissions;
 PRIVATE markers supply the existing literal DLP policy. A public excerpt is redacted by
 locating, in the unmodified note, every PRIVATE block, every PRIVATE value from current
 privacy sources, all configured aliases and retained private-marked backups, every
-configured environment credential and every credential-shaped value. Overlapping or
-adjacent matches are merged and each merged range is replaced once with `[private]`, so
-no replacement can split or swallow another match; unbalanced markers fail closed. This
-runs on the whole note before the 12000-character excerpt limit, so the cut cannot
-expose part of a value. Public excerpts are posted as plain text under a
-`Memory ALIAS (approved public excerpt):` heading; no model reads them.
-Owner-private reads can show PRIVATE-marked text but still mask known credentials.
+configured environment credential and every credential-shaped value, counting
+overlapping occurrences. Overlapping or adjacent matches are merged and each merged range
+is replaced once with `[private]`, so no replacement can split or swallow another match;
+a final credential-pattern pass catches any shape formed where text meets a placeholder.
+Unbalanced markers fail closed. This runs on the whole note before the 12000-character
+excerpt limit, so the cut cannot expose part of a value. Public excerpts are posted as
+plain text under a `Memory ALIAS (approved public excerpt):` heading; no model reads
+them. Owner-private reads and proposal previews show PRIVATE-marked text but mask
+configured and credential-shaped credentials the same way.
 Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.
 

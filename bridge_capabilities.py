@@ -206,7 +206,7 @@ class Capabilities:
             if isinstance(request, MemoryRequest):
                 try:
                     credentials = tuple(self.secrets | self.active_secrets)
-                    text = await self.memory.execute(request, privacy, self.redact, credentials)
+                    text = await self.memory.execute(request, privacy, credentials)
                 except OSError:
                     # A missing or access-denied memory file, never a network failure.
                     raise CapabilityError("Memory file unavailable") from None
