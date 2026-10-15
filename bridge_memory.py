@@ -7,7 +7,7 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from collections.abc import Callable
 from typing import Any
 
@@ -71,9 +71,14 @@ class MemoryAccess:
         require(set(data) <= {"enabled", "root", "files", "user_ids", "bot_ids", "credential_env"})
         self.enabled = data["enabled"]
         root = data.get("root")
+        # Local disks only: reject UNC/device roots in either slash form (\\host or //host).
         require(
             root is None
-            or (isinstance(root, str) and Path(root).is_absolute() and not root.startswith("\\\\"))
+            or (
+                isinstance(root, str)
+                and Path(root).is_absolute()
+                and not PureWindowsPath(root).drive.startswith("\\\\")
+            )
         )
         require(not self.enabled or root is not None)
         self.root = Path(root) if root else None

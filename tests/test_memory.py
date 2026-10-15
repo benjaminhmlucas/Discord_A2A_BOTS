@@ -258,7 +258,7 @@ def test_config_validation_and_disabled_bot_and_quote_behaviour(tmp_path):
     variants = [None, [], {}, {"enabled": 1}, {"enabled": False, "extra": 1}]
     data = base["memory"]
     for key, values in {
-        "root": ["relative", "\\\\server\\share", None, 3],
+        "root": ["relative", "\\\\server\\share", "//server/share/notes", None, 3],
         "files": [
             [],
             {str(i): {} for i in range(33)},

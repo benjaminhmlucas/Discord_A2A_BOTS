@@ -18,6 +18,10 @@ from bridge_http import CapabilityError
 
 CONTROL = ".botbridge-memory"
 MAX_BYTES = 65536
+# The journal is append-only. A commit starts only if every line its transaction can
+# still write (prepared, committed or abandoned, and one recovery line) fits under the cap.
+AUDIT_LIMIT = 1_048_576
+AUDIT_RESERVE = 4096
 
 
 def windows_api() -> Any:
@@ -270,8 +274,6 @@ class MemoryStore:
     def audit(self, record: dict[str, Any], outcome: str) -> None:
         relative = CONTROL + "/audit.jsonl"
         path = self.path(relative, missing=True)
-        if path.exists() and path.stat().st_size > 1048000:
-            raise CapabilityError("Memory audit capacity reached")
         line = (
             json.dumps(
                 {
@@ -286,6 +288,8 @@ class MemoryStore:
             )
             + "\n"
         )
+        if self.audit_size() + len(line.encode()) > AUDIT_LIMIT:
+            raise CapabilityError("Memory audit capacity reached")
         flags = (
             os.O_WRONLY
             | os.O_APPEND
@@ -306,6 +310,10 @@ class MemoryStore:
                 handle.write(line.encode())
                 handle.flush()
                 os.fsync(handle.fileno())
+
+    def audit_size(self) -> int:
+        path = self.path(CONTROL + "/audit.jsonl", missing=True)
+        return path.stat().st_size if path.exists() else 0
 
     def commit(self, alias: str, expected: str, after: bytes) -> str:
         self.write_allowed()
@@ -333,6 +341,9 @@ class MemoryStore:
                 for prefix, suffix in (("receipt-", ".json"), ("backup-", ".md"))
             ):
                 raise CapabilityError("Memory recovery capacity reached")
+            # Refuse before preparing so a full journal can never strand a transaction.
+            if self.audit_size() + AUDIT_RESERVE > AUDIT_LIMIT:
+                raise CapabilityError("Memory audit capacity reached")
             identity = secrets.token_hex(16)
             record = {
                 "id": identity,
@@ -361,7 +372,11 @@ class MemoryStore:
             return f"Memory {alias} committed; revision {digest(after)}; receipt {identity}."
 
     def status(self) -> str:
-        record = self.pending()
+        if not (self.path(".") / CONTROL).exists():
+            return "Memory: no pending recovery."
+        # Hold the writers' lock so this read cannot block a concurrent commit's rename.
+        with self.lock():
+            record = self.pending()
         if record is None:
             return "Memory: no pending recovery."
         return (

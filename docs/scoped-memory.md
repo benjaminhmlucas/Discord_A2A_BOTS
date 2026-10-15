@@ -31,16 +31,20 @@ In the owner's direct DM with that bot (no mention needed):
 - `/memory status`: inspect a pending recovery receipt.
 - `/memory recover RECEIPT`: explicitly recover that recorded transaction.
 
-Write text and confirmations are refused in public channels. Bot authors, webhooks,
-quoted commands, forged owner IDs, guild channels and group DMs cannot authorize private
-access. Discord does not name the recipient of an incoming DM, so a DM command is
-accepted from the configured owner in a private, non-guild channel. Before any private
-memory read or write, the runtime asks Discord for the owner's DM, requires that it is
-the owner's private channel and, for a DM command, the same channel the command came
-from, and sends an acceptance message there. A failed destination prevents dispatch
-with no public fallback. A mention inside note text does not select another bot. Confirmation tokens
-are bound to the owner and selected bot, single-use, bounded to 16 pending proposals,
-and discarded on expiry or restart. Nothing in memory text can dispatch another action.
+Write text, confirmations, status and recovery are refused in the public channel; only
+`read` and `private` are accepted there, and other guild channels are ignored. Bot
+authors, webhooks, quoted commands, forged owner IDs and group DMs cannot authorize
+private access. Discord does not name the recipient of an incoming DM, so a DM command
+is accepted from the configured owner in a private, non-guild channel. Before any
+private memory read or write, the runtime asks Discord for the owner's DM, requires that
+it is the owner's private channel and, for a DM command, the same channel the command
+came from, and sends an acceptance message there. A failed destination prevents dispatch
+with no public fallback. A mention inside note text does not select another bot.
+Confirmation tokens are bound to the owner and selected bot, single-use, bounded to 16
+pending proposals, and discarded on expiry or restart. Nothing in memory text can
+dispatch another action. Discord renders previews and private reads with Markdown and
+trims surrounding whitespace, so the display may differ slightly; a commit writes
+exactly the submitted text, bound to its SHA-256 revision.
 
 ## Configuration
 
@@ -75,13 +79,13 @@ Literal filtering does not identify every paraphrase or encoding of a secret.
 Curate public files and review every server-side credential scope before enablement.
 
 Precreate the root, approved files and nested directories with restrictive owner-only
-filesystem permissions. Windows control files inherit those ACLs; POSIX atomic and
-audit files use mode 0600, and the control directory uses 0700 to protect its SQLite
-lock file as well. Use a local disk, not UNC/network
-storage. Do not let untrusted accounts write this root. Keep the existing privacy
-source set to the same root. Paths and exact public/private/write policy need
-operator review and isolated acceptance before activation. Set `enabled: false`
-and restart through the normal deployment workflow to disable the feature.
+filesystem permissions. Windows control files inherit those ACLs; POSIX atomic and audit
+files use mode 0600, and the control directory uses 0700 to protect its SQLite lock file
+as well. Use a local disk, not UNC/network storage; `\\host` and `//host` roots are
+rejected. Do not let untrusted accounts write this root. Keep the existing privacy
+source set to the same root. Paths and exact public/private/write policy need operator
+review and isolated acceptance before activation. Set `enabled: false` and restart
+through the normal deployment workflow to disable the feature.
 
 ## Conflicts and recovery
 
@@ -101,33 +105,35 @@ hold only the alias, path, write mode and before/after hashes. Audit records con
 alias, receipt, hashes, timestamp and outcome (`prepared`, `committed`, `abandoned`,
 `recovered-applied` or `recovered-unapplied`), never note contents or credentials.
 Preimage backups retain PRIVATE markers so replacing a note does not erase the deny
-set for its old private values. At 64 receipts/backups or approximately 1 MiB of audit
-metadata, new writes stop until the operator archives records while preserving the
+set for its old private values. A commit is refused before any preparation once 64
+receipts or 64 backups exist, or when the 1 MiB audit journal lacks a 4 KiB reserve for
+the rest of the transaction and its recovery, so a full journal never strands a pending
+record. Writes stay refused until the operator archives records while preserving the
 journal; reads continue. Nothing silently prunes these append-only records.
 
 If the final revision check finds an external edit, nothing is written: the commit is
 journaled as `abandoned`, its pending record is closed and the owner sees a revision
-conflict. Any other failure after preparation (a crash, a write error, or a failed
-final audit entry) leaves a pending record, even if the note was already replaced;
-later commits are refused until it is resolved. After any refused commit, check
-`/memory status`. The owner inspects `status` and
-explicitly selects `recover RECEIPT`. Recovery rolls forward: if the note already has
-the confirmed revision it is kept (`recovered-applied`); if the note still has the
-prior revision, the change was not applied and only the record is closed
-(`recovered-unapplied`). Recovery never rewrites the note and refuses any other
-revision; an operator must then inspect the note, receipt and preimage and resolve the
-pending record locally. The same external-editor coordination requirement applies.
-Atomic write/recovery work finishes before cancellation releases the request's lock;
-a Discord timeout can occur after the file changed. Inspect the private revision
-and receipt before retrying; a used confirmation cannot be replayed.
+conflict. Any other failure after preparation (a crash or a filesystem write error)
+leaves a pending record, even if the note was already replaced; later commits are
+refused until it is resolved. After any refused commit, check `/memory status`, which
+waits for other bridge writers, then explicitly select `recover RECEIPT`. Recovery rolls
+forward: if the note already has the confirmed revision it is kept
+(`recovered-applied`); if the note still has the prior revision, the change was not
+applied and only the record is closed (`recovered-unapplied`). Recovery never rewrites
+the note and refuses any other revision; an operator must then inspect the note, receipt
+and preimage and resolve the pending record locally. The same external-editor
+coordination requirement applies. Atomic write/recovery work finishes before
+cancellation releases the request's lock; a Discord timeout can occur after the file
+changed. Inspect the private revision and receipt before retrying; a used confirmation
+cannot be replayed.
 
 A command the policy does not allow (wrong channel, non-owner, unknown alias or
 malformed arguments) gets the generic reply `Bridge: capability request denied; check
-configuration and command arguments.` An allowed command that then fails replies with
-a fixed reason, for example `Memory revision conflict`,
-`Memory confirmation unavailable`, `Memory file unavailable` (missing or access-denied
-file) or `Memory busy; try again shortly` (another bridge writer holds the root lock).
-These reasons never include note text, paths or credentials.
+configuration and command arguments.` An allowed command that then fails replies with a
+fixed reason, for example `Memory revision conflict`, `Memory confirmation unavailable`,
+`Memory file unavailable` (missing or access-denied file) or `Memory busy; try again
+shortly` (another bridge writer holds the root lock). These reasons never include note
+text, paths or credentials.
 
 ## AC evidence and deployment
 
@@ -138,9 +144,9 @@ roll-forward recovery after real process crashes and cancellation through produc
 code. Owner-DM authorization is also checked against messages built by discord.py's own
 gateway parser, so the test DM shape matches the library. Discord transport and provider
 replies are test adapters; the authorization, filesystem, SQLite and memory dispatcher
-are not mocked. OS fault-injection tests
-cover failure paths separately from real native behavior. Both platform CI suites
-and exact coverage/security gates must pass before review readiness.
+are not mocked. OS fault-injection tests cover failure paths separately from real native
+behavior. Both platform CI suites and exact coverage/security gates must pass before
+review readiness.
 
 No live shared-memory, provider-account or Discord acceptance is claimed by fixtures.
 Keep access off until the reviewed aliases, ACLs, privacy source and delivery policy

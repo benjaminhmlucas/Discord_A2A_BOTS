@@ -276,7 +276,7 @@ def test_scoped_write_policy_capacity_and_real_sqlite_lock(tmp_path):
         (root / io.CONTROL / f"backup-{index}.md").write_text("archive")
     with pytest.raises(CapabilityError, match="backup limit"):
         store.backup_texts()
-    (root / io.CONTROL / "audit.jsonl").write_bytes(b"x" * 1048001)
+    (root / io.CONTROL / "audit.jsonl").write_bytes(b"x" * io.AUDIT_LIMIT)
     with pytest.raises(CapabilityError, match="audit capacity"):
         store.audit(pending_record(root, files), "prepared")
 
@@ -300,3 +300,38 @@ def test_external_edit_during_durable_preparation_is_not_overwritten(tmp_path):
     # The conflict was detected before writing, so no recovery is left pending.
     assert store.pending() is None
     assert journal_outcomes(root) == ["prepared", "abandoned"]
+
+
+def test_full_journal_refuses_before_preparing_and_never_strands_recovery(tmp_path):
+    root, files, store = store_for(tmp_path)
+    with store.lock():
+        pass
+    journal = root / io.CONTROL / "audit.jsonl"
+    before = (root / "notes.md").read_bytes()
+    # One byte short of the reserve: refused before any backup, receipt or pending record.
+    journal.write_bytes(b"x" * (io.AUDIT_LIMIT - io.AUDIT_RESERVE + 1))
+    with pytest.raises(CapabilityError, match="audit capacity"):
+        store.commit("notes", io.digest(before), b"after")
+    assert store.pending() is None and (root / "notes.md").read_bytes() == before
+    assert not list((root / io.CONTROL).glob("backup-*")) and not list(
+        (root / io.CONTROL).glob("receipt-*")
+    )
+    # Exactly the reserve: the whole transaction fits, and recovery still has room.
+    journal.write_bytes(b"x" * (io.AUDIT_LIMIT - io.AUDIT_RESERVE))
+    assert "committed" in store.commit("notes", io.digest(before), b"after")
+    record = pending_record(root, files)
+    (root / io.CONTROL / "pending.json").write_text(json.dumps(record), encoding="utf-8")
+    assert "recovered" in store.recover(record["id"])
+    assert journal.stat().st_size <= io.AUDIT_LIMIT and store.pending() is None
+
+
+def test_status_waits_for_writers_and_requires_a_root(tmp_path):
+    root, files, store = store_for(tmp_path)
+    assert store.status() == "Memory: no pending recovery."
+    assert not (root / io.CONTROL).exists()  # Status never creates the control directory.
+    with store.lock():
+        with pytest.raises(CapabilityError, match="busy"):
+            io.MemoryStore(root, files).status()
+    assert store.status() == "Memory: no pending recovery."
+    with pytest.raises(CapabilityError, match="root unavailable"):
+        io.MemoryStore(None, {}).status()
