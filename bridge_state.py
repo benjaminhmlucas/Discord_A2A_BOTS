@@ -98,7 +98,7 @@ class State:
             return reservation
 
     def start_request(self, reservation):
-        """Spend only when entering the provider, never revive an expired reservation."""
+        """Spend when starting a provider or capability attempt; never revive an expired reservation."""
         now = time.time()
         with self.connect() as db:
             return (
@@ -110,7 +110,7 @@ class State:
             )
 
     def release_request(self, reservation):
-        """Unused capacity is refundable; started provider attempts remain charged."""
+        """Unused capacity is refundable; started provider/capability attempts remain charged."""
         with self.connect() as db:
             db.execute("DELETE FROM provider_budget WHERE id=? AND started=0", (reservation,))
 

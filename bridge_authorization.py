@@ -1,13 +1,14 @@
 """Decide capabilities from Discord transport metadata, never model or context text."""
 
 import re
+from typing import Any
 
 
 class WorkDenied(ValueError):
     """A static refusal that is safe to send without revealing request contents."""
 
 
-def eligible_sender(message, bot_id, config):
+def eligible_sender(message: Any, bot_id: int, config: dict[str, Any]) -> bool:
     # Discord supplies these fields; content/display names/quoted IDs do not.
     return (
         type(message.author.id) is int
@@ -21,7 +22,9 @@ def eligible_sender(message, bot_id, config):
     )
 
 
-def authorize_work(text, message, bot_id, codex_id, config):
+def authorize_work(
+    text: str, message: Any, bot_id: int, codex_id: int, config: dict[str, Any]
+) -> bool:
     """Called only for an eligible sender, after authenticating any bot handoff."""
     if not re.match(r"^/work(?:\s|$)", text, re.I):
         return False
