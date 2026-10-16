@@ -11,6 +11,7 @@ import pytest
 
 import bridge_memory_io as io
 from bridge_http import CapabilityError
+from bridge_memory import MAX_PATH
 from test_memory import populate, memory_config
 
 
@@ -335,3 +336,26 @@ def test_status_waits_for_writers_and_requires_a_root(tmp_path):
     assert store.status() == "Memory: no pending recovery."
     with pytest.raises(CapabilityError, match="root unavailable"):
         io.MemoryStore(None, {}).status()
+
+
+def test_recovery_records_always_fit_their_read_limit(tmp_path):
+    root, files, store = store_for(tmp_path)
+    before = (root / "notes.md").read_bytes()
+    # The largest record the configuration allows reads back within the limit.
+    largest = {
+        "id": "f" * 32,
+        "alias": "a" * 32,
+        "path": "p" * MAX_PATH,
+        "before_hash": "f" * 64,
+        "after_hash": "f" * 64,
+        "write": "replace",
+    }
+    assert len(json.dumps(largest, ensure_ascii=False).encode()) <= io.RECORD_LIMIT
+    # A record that could not be read back is refused before any preparation.
+    oversized = {"x" * io.RECORD_LIMIT: files["notes"]}
+    with pytest.raises(CapabilityError, match="record too large"):
+        io.MemoryStore(root, oversized).commit("x" * io.RECORD_LIMIT, io.digest(before), b"new")
+    assert (root / "notes.md").read_bytes() == before and store.pending() is None
+    control = root / io.CONTROL
+    assert not list(control.glob("backup-*")) and not list(control.glob("receipt-*"))
+    assert not (control / "audit.jsonl").exists()

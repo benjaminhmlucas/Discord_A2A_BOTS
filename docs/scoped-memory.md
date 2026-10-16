@@ -2,8 +2,9 @@
 
 Memory access is off by default. It does not inherit model tools or arbitrary file
 access. Operators configure up to 32 named Markdown files under one absolute local
-root; that root must equal the installation's privacy source. Each file is at most
-64 KiB, and each displayed excerpt or submitted note is at most 12000 characters.
+root; that root must equal the installation's privacy source. Each relative path is at
+most 1024 characters, each file at most 64 KiB, and each displayed excerpt or submitted
+note at most 12000 characters.
 Files must already exist. Paths, links, junctions, hard links, invalid UTF-8, unreadable
 sources and malformed PRIVATE markers fail closed. Filesystem work runs in worker
 threads; the existing bounded queue, per-bot lock and persistent admission/daily
@@ -133,7 +134,10 @@ rolls forward: if the note already has the confirmed revision it is kept
 applied and only the record is closed (`recovered-unapplied`). Recovery never rewrites
 the note and refuses any other revision; an operator must then inspect the note, receipt
 and preimage and resolve the pending record locally. The same external-editor
-coordination requirement applies. Atomic write/recovery work finishes before
+coordination requirement applies. Do not rename or remove an alias, or change its path or
+write mode, while a record is pending: status, recovery and every commit then refuse with
+`Memory recovery policy mismatch` until the configuration again matches
+`.botbridge-memory/pending.json`. Atomic write/recovery work finishes before
 cancellation releases the request's lock; a Discord timeout can occur after the file
 changed. Inspect the private revision and receipt before retrying; a used confirmation
 cannot be replayed.

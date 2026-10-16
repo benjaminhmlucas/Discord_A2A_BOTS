@@ -22,6 +22,9 @@ MAX_BYTES = 65536
 # still write (prepared, committed or abandoned, and one recovery line) fits under the cap.
 AUDIT_LIMIT = 1_048_576
 AUDIT_RESERVE = 4096
+# Pending/receipt records hold only ids, hashes, alias and path. Configured paths are
+# capped well below this, and a commit refuses any record that would not read back.
+RECORD_LIMIT = 4096
 
 
 def windows_api() -> Any:
@@ -228,7 +231,7 @@ class MemoryStore:
         path = self.path(CONTROL + "/pending.json", missing=True)
         if not path.exists():
             return None
-        value = json.loads(self.read(CONTROL + "/pending.json", 4096))
+        value = json.loads(self.read(CONTROL + "/pending.json", RECORD_LIMIT))
         if not isinstance(value, dict) or set(value) != {
             "id",
             "alias",
@@ -356,6 +359,9 @@ class MemoryStore:
                 "write": definition["write"],
             }
             raw = json.dumps(record, ensure_ascii=False).encode()
+            # Refuse before preparing: status and recovery must always be able to read it.
+            if len(raw) > RECORD_LIMIT:
+                raise CapabilityError("Memory recovery record too large")
             # Retain marker-bearing preimages so the existing privacy scan still knows
             # old private values after a note is replaced.
             self.atomic(CONTROL + "/backup-" + identity + ".md", before)

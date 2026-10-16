@@ -31,6 +31,8 @@ PROTECTED = {
 }
 MAX_BYTES = 65536
 MAX_TEXT = 12000
+# Keeps every recovery record far below bridge_memory_io.RECORD_LIMIT.
+MAX_PATH = 1024
 TTL = 120
 
 
@@ -92,7 +94,7 @@ class MemoryAccess:
                 and set(definition) == {"path", "public", "private", "write"}
             )
             path = definition["path"]
-            require(isinstance(path, str) and RELATIVE.fullmatch(path))
+            require(isinstance(path, str) and len(path) <= MAX_PATH and RELATIVE.fullmatch(path))
             require(
                 all(
                     part.split(".")[0].upper()

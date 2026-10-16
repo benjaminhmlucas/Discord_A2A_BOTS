@@ -276,7 +276,14 @@ def test_config_validation_and_disabled_bot_and_quote_behaviour(tmp_path):
             variants.append(invalid)
     definition = data["files"]["notes"]
     for key, values in {
-        "path": ["../outside.md", "/outside.md", "a\\b.md", "CON.md", "notes.txt"],
+        "path": [
+            "../outside.md",
+            "/outside.md",
+            "a\\b.md",
+            "CON.md",
+            "notes.txt",
+            "a" * 1022 + ".md",
+        ],
         "public": [1],
         "private": [1, False],
         "write": ["delete"],
