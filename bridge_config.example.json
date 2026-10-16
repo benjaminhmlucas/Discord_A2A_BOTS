@@ -24,6 +24,7 @@
   "allowed_user_ids": [],
   "allow_work": false,
   "capabilities": {"enabled": false},
+  "memory": {"enabled": false},
   "user_requests_per_minute": 6,
   "bot_requests_per_minute": 30,
   "bot_requests_per_day": 200

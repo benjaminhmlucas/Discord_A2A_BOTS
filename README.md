@@ -137,6 +137,10 @@ Discussion replies include a validated control decision. A participant can stop 
 
 Public providers have no native browsing or inherited MCP access. Optional bridge-owned `/web`, `/search` and `/mcp` commands supply approved read-only results; they are disabled by default. See [scoped capability configuration](docs/scoped-capabilities.md) for supported transports, permissions and acceptance checks. Without this configuration, supply the relevant code or diff for review; a repository URL alone is not an inspected source. Saying "stop if you cannot access it" ends a discussion after that explanation.
 
+Optional `/memory` commands retrieve approved public excerpts or owner-private files
+and confirm dedicated note updates in the owner's DM. Memory access is disabled by
+default; shared task/protocol records remain read-only. See [scoped memory policy](docs/scoped-memory.md).
+
 ## Development checks
 
 ```powershell

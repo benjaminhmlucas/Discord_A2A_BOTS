@@ -14,6 +14,7 @@ from yarl import URL
 from bridge_authorization import eligible_sender
 from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_mcp import MCPClient, PROTOCOL, LEGACY_PROTOCOL
+from bridge_memory import MemoryAccess, MemoryRequest
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
 ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
@@ -38,6 +39,7 @@ class Capabilities:
         require(set(data) <= {"enabled", "web", "tools", "search", "internal_origins"})
         self.enabled = data["enabled"]
         self.config = config
+        self.memory = MemoryAccess(config, log)
         self.users, self.bots = config["allowed_user_ids"], config["enabled_bots"]
         self.log = log
         self.web = data.get("web", False)
@@ -120,6 +122,7 @@ class Capabilities:
 
     def refresh_secrets(self) -> None:
         self.secrets.clear()
+        self.secrets.update(self.memory.credentials())
         for tool in self.tools.values():
             name = tool["credential_env"]
             if name:
@@ -132,14 +135,20 @@ class Capabilities:
             text = text.replace(secret, "[REDACTED CREDENTIAL]")
         return text
 
-    def authorize(self, text: str, message: Any, bot_id: int) -> CapabilityRequest | None:
+    def authorize(
+        self, text: str, message: Any, bot_id: int
+    ) -> CapabilityRequest | MemoryRequest | None:
         try:
             return self.request(text, message, bot_id)
         except CapabilityError:
             self.log("Capability command authorization=denied outcome=not_dispatched")
             raise
 
-    def request(self, text: str, message: Any, bot_id: int) -> CapabilityRequest | None:
+    def request(
+        self, text: str, message: Any, bot_id: int
+    ) -> CapabilityRequest | MemoryRequest | None:
+        if re.match(r"^/memory(?:\s|$)", text, re.I):
+            return self.memory.authorize(text, message, bot_id)
         command = re.match(r"^/(web|search|mcp)(?:\s|$)", text, re.I)
         if not command:
             return None
@@ -188,12 +197,21 @@ class Capabilities:
         self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
         return request
 
-    async def execute(self, request: CapabilityRequest, privacy: Any) -> str:
+    async def execute(self, request: CapabilityRequest | MemoryRequest, privacy: Any) -> str:
         # Only the authenticated message selected this operation. Never parse a result as a command.
         outcome = "failed"
         try:
             self.active_secrets.clear()
             self.refresh_secrets()
+            if isinstance(request, MemoryRequest):
+                try:
+                    credentials = tuple(self.secrets | self.active_secrets)
+                    text = await self.memory.execute(request, privacy, credentials)
+                except OSError:
+                    # A missing or access-denied memory file, never a network failure.
+                    raise CapabilityError("Memory file unavailable") from None
+                outcome = "completed"
+                return text
             values = request.arguments
             if request.name != "web":
                 values = {**self.tools[request.name]["fixed_arguments"], **values}

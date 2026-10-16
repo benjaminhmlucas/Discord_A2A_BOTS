@@ -15,7 +15,7 @@ Review and verify the active GitHub ruleset after changing job names or permissi
 The Quality job runs the fail-closed `scripts/check_ci_policy.py` workflow checker.
 The [prompt-injection policy](prompt-injection.md) describes trusted authorization
 sources, adversarial AC evidence and why candidate-controlled CI still needs
-independent review. MCP/web and expanded memory capabilities remain disabled.
+independent review. MCP/web and scoped memory capabilities are disabled by default.
 
 CI uses SHA-pinned actions, read-only checkout credentials and no application
 secrets. Only the CodeQL job has permission to publish security findings. PR code

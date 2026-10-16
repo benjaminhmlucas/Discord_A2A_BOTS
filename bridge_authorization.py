@@ -2,10 +2,43 @@
 
 import re
 from typing import Any
+import discord
 
 
 class WorkDenied(ValueError):
     """A static refusal that is safe to send without revealing request contents."""
+
+
+def private_destination(channel: Any, owner: int) -> bool:
+    recipient = getattr(channel, "recipient", None)
+    return (
+        type(getattr(channel, "id", None)) is int
+        and channel.id > 0
+        and getattr(channel, "type", None) is discord.ChannelType.private
+        and type(getattr(recipient, "id", None)) is int
+        and getattr(recipient, "id", None) == owner
+        and getattr(recipient, "bot", None) is False
+    )
+
+
+def owner_memory_dm(message: Any, bot_id: int, config: dict[str, Any]) -> bool:
+    # discord.py builds an inbound DM channel without recipients, so the recipient is
+    # unknown here. A non-guild private channel whose human author is the owner can only
+    # be the owner's DM with this bot. The runtime confirms it against create_dm() before
+    # any private memory I/O.
+    channel = message.channel
+    return (
+        type(message.author.id) is int
+        and message.author.id == config["owner_id"]
+        and message.author.id in config["allowed_user_ids"]
+        and message.author.bot is False
+        and not message.webhook_id
+        and getattr(message, "guild", None) is None
+        and bot_id in config["enabled_bots"]
+        and type(getattr(channel, "id", None)) is int
+        and channel.id > 0
+        and getattr(channel, "type", None) is discord.ChannelType.private
+    )
 
 
 def eligible_sender(message: Any, bot_id: int, config: dict[str, Any]) -> bool:
