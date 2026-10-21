@@ -198,3 +198,23 @@ def test_cli_real_profile_edits_migration_and_lifecycle(tmp_path, capsys):
         runpy.run_module("mcp_connections", run_name="__main__")
     assert exit.value.code == 0
     assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"total_request_seconds": 0},
+        {"owner_id": 0},
+        {"enabled_bots": [999]},
+        {"bot_ids": {"codex": True, "antigravity": 102, "claude": 103}},
+    ],
+)
+def test_cli_export_uses_runtime_validation_before_creating_output(tmp_path, capsys, change):
+    config = configured(tmp_path)
+    config.update(change)
+    source, output = tmp_path / "source.json", tmp_path / "proposed.json"
+    source.write_text(json.dumps(config))
+    original = source.read_bytes()
+    assert cli.main(["--config", str(source), "migrate", "--output", str(output)]) == 1
+    assert not output.exists() and source.read_bytes() == original
+    assert "Traceback" not in capsys.readouterr().err

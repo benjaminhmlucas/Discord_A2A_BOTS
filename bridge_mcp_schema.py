@@ -54,7 +54,7 @@ def values(value: Any, depth: int = 0) -> list[str]:
         return [s for v in value for s in values(v, depth + 1)]
     if type(value) not in (str, int, float, bool, type(None)):
         raise CapabilityError("Invalid MCP JSON value")
-    if (type(value) is float and not math.isfinite(value)) or len(str(value)) > 2048:
+    if (type(value) is float and not math.isfinite(value)) or len(str(value)) > 4096:
         raise CapabilityError("Invalid MCP JSON scalar")
     return [str(value)]
 
@@ -62,7 +62,7 @@ def values(value: Any, depth: int = 0) -> list[str]:
 def bounded(value: Any) -> list[str]:
     try:
         leaves = values(value)
-        if len(leaves) > 256 or len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 8192:
+        if len(leaves) > 256 or len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 65536:
             raise CapabilityError("MCP JSON size exceeded")
         return leaves
     except (ValueError, UnicodeError) as exc:

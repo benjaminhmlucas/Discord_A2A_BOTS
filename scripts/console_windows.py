@@ -10,6 +10,6 @@ def creation_flags(*, background: bool = True, env: Mapping[str, str] | None = N
     environment = os.environ if env is None else env
     if os.name != "nt" or environment.get("BOTBRIDGE_SHOW_CONSOLE") == "1":
         return 0
-    if background or not ctypes.windll.kernel32.GetConsoleWindow():
-        return subprocess.CREATE_NO_WINDOW
+    if background or not getattr(ctypes, "windll").kernel32.GetConsoleWindow():
+        return int(getattr(subprocess, "CREATE_NO_WINDOW"))
     return 0

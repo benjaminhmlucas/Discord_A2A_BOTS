@@ -9,6 +9,7 @@ import sys
 from unittest.mock import patch
 import ctypes
 import time
+import argparse
 
 import pytest
 
@@ -18,6 +19,7 @@ from bridge_http import CapabilityError
 from bridge_privacy import Privacy
 from test_capabilities import config_for, FixtureServer, C, A, OWNER, CANARY, TOKEN_ENV
 from test_bridge import Bridge, Channel, Client, Message, Author
+import mcp_connections as cli
 
 SERVER = Path(__file__).parent / "fixtures/mcp_stdio_server.py"
 INPUT = {
@@ -292,6 +294,8 @@ def test_http_manager_credentials_discovery_and_scoped_busy_session(tmp_path):
                     async with manager.session("legacy.lookup", set()):
                         pass
                 assert manager._active["legacy.lookup"] is client
+                assert manager.status("legacy.lookup")["connected"] is True
+                assert manager.status("legacy.lookup")["outcome"] == "connected"
                 for listing in (
                     {},
                     {"tools": [1]},
@@ -305,6 +309,75 @@ def test_http_manager_credentials_discovery_and_scoped_busy_session(tmp_path):
                     with pytest.raises(CapabilityError):
                         await client.discover()
                 await manager.disconnect("legacy.lookup")
+
+    asyncio.run(scenario())
+
+
+def test_reflected_bearer_and_session_are_redacted_before_cli_json(tmp_path):
+    async def scenario():
+        async with FixtureServer() as server:
+            server.legacy = True
+            config = config_for(server.origin, TOKEN_ENV)
+            config["capabilities"]["tools"]["lookup"]["protocol"] = "2025-11-25"
+            source = tmp_path / "config.json"
+            source.write_text(json.dumps(migrated(config)))
+            server.list_result = {"tools": [{"name": CANARY + "." + server.session_id}]}
+            with patch.dict(os.environ, {TOKEN_ENV: CANARY}):
+                result = await cli.execute(
+                    argparse.Namespace(config=str(source), action="discover", name="legacy.lookup")
+                )
+            encoded = json.dumps(result)
+            assert CANARY not in encoded and server.session_id not in encoded
+            assert result["tools"] == ["[REDACTED CREDENTIAL].[REDACTED CREDENTIAL]"]
+            assert server.calls[0][1]["Authorization"] == "Bearer " + CANARY
+
+    asyncio.run(scenario())
+
+
+def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path):
+    (tmp_path / "MEMORY.md").write_text("public")
+
+    async def scenario():
+        async with FixtureServer() as server:
+            config = config_for(server.origin)
+            tool = config["capabilities"]["tools"]["lookup"]
+            tool["fixed_arguments"] = {"scope": "x" * 3000}
+            tool["parameters"] = {f"q{i}": "string" for i in range(16)}
+            config["capabilities"]["search"] = None
+            args = {f"q{i}": "x" * 2048 for i in range(16)}
+            for current in (config, migrated(config)):
+                caps = Capabilities(current, lambda _: None)
+                request = caps.authorize(
+                    "/mcp lookup " + json.dumps(args), Message(1, "", Channel()), C
+                )
+                assert "public answer" in await caps.execute(request, Privacy(tmp_path))
+            assert len([r for r, _ in server.calls if r["method"] == "tools/call"]) == 2
+
+    asyncio.run(scenario())
+
+
+def test_nested_deadlines_backpressure_cannot_lose_owned_process_tree(tmp_path):
+    async def scenario():
+        manager = Capabilities(configured(tmp_path, "block_stdin"), lambda _: None).connections
+        manager.registry.http.seconds = 0.5
+        host = None
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                async with asyncio.timeout(0.55):
+                    async with manager.session("first", set()) as client:
+                        host = client.process
+                        await client.discover()
+                        await client.rpc("tools/call", {"payload": "x" * 400000}, 123)
+            # Await the retained, shielded cleanup rather than assuming cancellation killed it.
+            await manager.disconnect("first")
+            pid = int((tmp_path / "audit.server.pid").read_text())
+            assert host is not None and host.returncode is not None
+            assert not alive(pid) and manager._active == {} and manager._closing == {}
+        finally:
+            # Failure on the pre-fix implementation must not leave a probe process alive.
+            if host is not None and host.returncode is None:
+                host.kill()
+                await host.wait()
 
     asyncio.run(scenario())
 

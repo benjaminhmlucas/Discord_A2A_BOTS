@@ -86,3 +86,6 @@ for line in sys.stdin:
         print(json.dumps(envelope), flush=True)
     if mode == "exit_after_init" and method == "initialize":
         sys.exit(0)
+    if mode == "block_stdin" and method == "tools/list":
+        audit.with_suffix(".server.pid").write_text(str(os.getpid()))
+        time.sleep(120)

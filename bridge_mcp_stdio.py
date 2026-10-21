@@ -113,8 +113,9 @@ class StdioClient(MCPClient):
             raise
 
     async def disconnect(self) -> None:
+        process = self.process
         try:
-            if self.process is not None:
+            if process is not None:
                 if self.cancelled_request is not None:
                     with suppress(OSError, CapabilityError, asyncio.TimeoutError):
                         async with asyncio.timeout(0.2):
@@ -123,18 +124,24 @@ class StdioClient(MCPClient):
                                 {"requestId": self.cancelled_request},
                                 None,
                             )
-                if WINDOWS:
-                    if self.process.returncode is None:
-                        self.process.kill()  # Closing the host's private job kills descendants.
-                else:
-                    with suppress(ProcessLookupError):
-                        getattr(os, "killpg")(self.process.pid, getattr(signal, "SIGKILL"))
-                await self.process.wait()
         finally:
-            if self.stderr_task is not None:
-                self.stderr_task.cancel()
-                with suppress(asyncio.CancelledError, CapabilityError):
-                    await self.stderr_task
-            self.process = None
-            self.stderr_task = None
-            self.cancelled_request = None
+            try:
+                if process is not None:
+                    # A second cancellation cannot skip the actual synchronous kill.
+                    with suppress(ProcessLookupError):
+                        if WINDOWS:
+                            if process.returncode is None:
+                                process.kill()
+                        else:
+                            getattr(os, "killpg")(process.pid, getattr(signal, "SIGKILL"))
+                    async with asyncio.timeout(1):
+                        await process.wait()
+            finally:
+                if self.stderr_task is not None:
+                    self.stderr_task.cancel()
+                    with suppress(asyncio.CancelledError, CapabilityError):
+                        await self.stderr_task
+                if process is None or process.returncode is not None:
+                    self.process = None
+                self.stderr_task = None
+                self.cancelled_request = None

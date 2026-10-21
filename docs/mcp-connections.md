@@ -151,8 +151,10 @@ No migration is required to continue using the original HTTP alias format.
 There are at most 32 profiles, 32 arguments/environment entries, 1024 characters per
 executable/working-directory path and 2048 characters per launch argument/value.
 Each profile is at most 16 KiB. Argument graphs are at most six levels, 32 object
-members/array items per container, 256 privacy leaves and 8 KiB encoded JSON; scalar
-text is at most 2048 characters. Schema text is at most 16 KiB, with at most eight
+members/array items per container, 256 privacy leaves and 64 KiB encoded JSON; scalar
+text is at most 4096 characters. Legacy dynamic parameters retain their separate
+2048-character admission limit, while existing fixed arguments can use the original
+4096-character aggregate bound. Schema text is at most 16 KiB, with at most eight
 `anyOf` choices and 16 enum values. Local aliases forbid unknown dynamic top-level
 arguments; nested additional-field behavior follows the explicit schema.
 

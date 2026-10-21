@@ -14,6 +14,7 @@ import aiohttp
 
 from bridge_capabilities import Capabilities
 from bridge_connections import migrated
+from bridge_settings import validate_runtime_config
 
 
 def read_json(path):
@@ -28,15 +29,16 @@ async def execute(args):
     config = read_json(args.config)
     if not isinstance(config, dict):
         raise ValueError("Invalid configuration root")
+    validate_runtime_config(config)
     caps = Capabilities(config, lambda _: None)
     if args.action in ("status", "test", "discover"):
         if args.action == "status":
             return [caps.connections.status(n) for n in caps.registry.export()["servers"]]
-        tools = await caps.connections.discover(args.name)
+        tools = await caps.connections.discover(args.name, caps.active_secrets)
         result = caps.connections.status(args.name)
         if args.action == "discover":
             # Names only: never print descriptions, schemas or server-supplied instructions.
-            result["tools"] = [t["name"] for t in tools]
+            result["tools"] = [caps.redact(t["name"]) for t in tools]
         return result
     if args.action == "migrate":
         result = migrated(config)
@@ -46,6 +48,7 @@ async def execute(args):
         )
         result = json.loads(json.dumps(config))
         result["capabilities"]["connections"] = registry.export()
+    validate_runtime_config(result)
     Capabilities(result, lambda _: None)
     # Never overwrite a live config, rollback snapshot, symlink or concurrent export.
     with Path(args.output).open("x", encoding="utf-8") as destination:

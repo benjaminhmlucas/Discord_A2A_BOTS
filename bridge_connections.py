@@ -136,6 +136,7 @@ class ConnectionManager:
         self._active: dict[str, MCPClient] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._states: dict[str, str] = {}
+        self._closing: dict[str, asyncio.Task[None]] = {}
         self._slots = asyncio.Semaphore(4)
 
     def status(self, name: str) -> dict[str, Any]:
@@ -194,12 +195,30 @@ class ConnectionManager:
 
     async def disconnect(self, name: str) -> None:
         self.registry.profile(name)
-        client = self._active.pop(name, None)
+        client = self._active.get(name)
         if client is not None:
+            task = self._closing.get(name)
+            if task is None:
+                task = asyncio.create_task(self.close_owned(name, client))
+                self._closing[name] = task
+                task.add_done_callback(lambda done: self.closed(name, done))
+            await asyncio.shield(task)
+
+    def closed(self, name: str, task: asyncio.Task[None]) -> None:
+        self._closing.pop(name, None)
+        if not task.cancelled():
+            task.exception()  # Retrieve failures even if the caller was cancelled.
+
+    async def close_owned(self, name: str, client: MCPClient) -> None:
+        try:
             async with asyncio.timeout(2):
                 await client.disconnect()
+            self._active.pop(name, None)
             if self._states.get(name) == "connected":
                 self._states[name] = "disconnected"
+        except BaseException:
+            self._states[name] = "cleanup_failed"
+            raise  # Keep the owner reference available for an explicit retry.
 
     @asynccontextmanager
     async def session(self, name: str, credentials: set[str]) -> AsyncIterator[MCPClient]:
@@ -212,14 +231,17 @@ class ConnectionManager:
                 yield client
                 self._states[name] = "completed"
             except BaseException:
-                self._states[name] = "failed"
+                if client is not None or name not in self._active:
+                    self._states[name] = "failed"
                 raise
             finally:
                 if client is not None:
                     await self.disconnect(name)
 
-    async def discover(self, name: str) -> list[dict[str, Any]]:
-        async with self.session(name, set()) as client:
+    async def discover(
+        self, name: str, credentials: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        async with self.session(name, set() if credentials is None else credentials) as client:
             return await client.discover()
 
     async def call(
