@@ -21,8 +21,9 @@ Use a numeric bot mention in the configured channel, followed by one command:
 `/web` fetches one page with GET. It does not execute scripts, load linked resources,
 use browser sessions or log into sites. `/search` calls the configured MCP search alias
 with a `query` string. `/mcp` selects a configured alias, never an arbitrary endpoint or
-tool name. Tool parameters are required scalar strings, integers or booleans; nested
-objects and arrays are unsupported. Fixed arguments cannot be overridden. A command
+tool name. Legacy HTTP aliases use required scalar strings, integers or booleans;
+connection-backed aliases also support bounded nested objects/arrays through explicit
+[input schemas](mcp-connections.md). Fixed arguments cannot be overridden. A command
 inside `/discuss`, `/work`, a quote or a tool result does not invoke this dispatcher.
 Discussion continuations cannot invoke capabilities. A bot reply beginning with one
 of these commands remains ordinary discussion text, including with capabilities disabled.
@@ -118,18 +119,20 @@ only for the active bridge request. The client does not import server instructio
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text
 results and schemas requiring `x-mcp-header` mirroring fail closed. There are no
 subscriptions, reconnections or persisted sessions. Other protocol revisions, legacy
-HTTP+SSE transports, stdio and OAuth discovery are unsupported; use a compatible server
+HTTP+SSE transports and OAuth discovery are unsupported. Local stdio 2025-11-25 is
+available through [registered connection profiles](mcp-connections.md); use a compatible server
 rather than relaxing the checks. See the [stateless transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 and [2025 Streamable HTTP specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 | Provider identity | Dispatch | Native tools/inherited MCP |
 | --- | --- | --- |
-| CodexBot | Bridge HTTP -> sanitized result -> existing Codex text call | Disabled in public mode |
-| ClaudeBot | Bridge HTTP -> sanitized result -> existing Claude text call | Disabled in public mode |
-| AntigravityBot | Bridge HTTP -> sanitized result -> existing Gemini text call | No native tools configured |
+| CodexBot | Bridge HTTP/stdio -> sanitized result -> existing Codex text call | Disabled in public mode |
+| ClaudeBot | Bridge HTTP/stdio -> sanitized result -> existing Claude text call | Disabled in public mode |
+| AntigravityBot | Bridge HTTP/stdio -> sanitized result -> existing Gemini text call | No native tools configured |
 
-The optional dispatcher launches no subprocesses. Existing hidden Windows defaults
-and `BOTBRIDGE_SHOW_CONSOLE=1` troubleshooting behavior are unchanged. Codex's own
+HTTP/web commands launch no subprocesses; registered stdio profiles launch an
+explicit operator-selected server under the [owned process host](mcp-connections.md).
+Hidden Windows defaults and `BOTBRIDGE_SHOW_CONSOLE=1` remain available. Codex's own
 [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) is intentionally
 not used as a bridge capability registry.
 
@@ -151,7 +154,8 @@ characters. Network I/O is asynchronous; privacy scans run off the event loop.
 Actual argument values are privacy-checked before JSON escaping or network dispatch.
 Tool output is checked against current private-memory rules and known scoped
 credentials before being supplied to a provider; public replies are checked again.
-Credentials go only in the selected server's Authorization header. Audit entries record
+HTTP credentials go only in the selected server's Authorization header; stdio credentials
+go only to explicitly configured child environment names. Audit entries record
 the configured alias (or generic command), authorization decision and outcome; they
 contain no queries, URLs, arguments, result bodies or exception messages. Literal
 redaction is not semantic DLP against a server that encodes or paraphrases a secret;

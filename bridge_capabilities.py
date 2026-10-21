@@ -15,6 +15,8 @@ from bridge_authorization import eligible_sender
 from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_mcp import MCPClient, PROTOCOL, LEGACY_PROTOCOL
 from bridge_memory import MemoryAccess, MemoryRequest
+from bridge_connections import Registry, ConnectionManager
+from bridge_mcp_schema import bounded, checked_schema, validate
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
 ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
@@ -36,7 +38,9 @@ class Capabilities:
     def __init__(self, config: dict[str, Any], log: Callable[[str], None]) -> None:
         data = config.get("capabilities", {"enabled": False})
         require(isinstance(data, dict) and type(data.get("enabled")) is bool)
-        require(set(data) <= {"enabled", "web", "tools", "search", "internal_origins"})
+        require(
+            set(data) <= {"enabled", "web", "tools", "search", "internal_origins", "connections"}
+        )
         self.enabled = data["enabled"]
         self.config = config
         self.memory = MemoryAccess(config, log)
@@ -55,10 +59,15 @@ class Capabilities:
             except (ValueError, UnicodeError):
                 raise ValueError("Invalid capabilities configuration") from None
         self.http = SafeHTTP(internal_origins=internal)
+        self.registry = Registry(data.get("connections", {"version": 1, "servers": {}}), self.http)
+        self.connections = ConnectionManager(self.registry)
         self.tools: dict[str, dict[str, Any]] = data.get("tools", {})
         require(isinstance(self.tools, dict) and len(self.tools) <= 32)
         for alias, tool in self.tools.items():
             require(isinstance(alias, str) and NAME.fullmatch(alias) and alias != "web")
+            if isinstance(tool, dict) and "connection" in tool:
+                self.validate_connected_tool(tool)
+                continue
             require(
                 isinstance(tool, dict)
                 and set(tool)
@@ -113,20 +122,65 @@ class Capabilities:
             or (
                 isinstance(self.search, str)
                 and self.search in self.tools
-                and self.tools[self.search]["parameters"] == {"query": "string"}
+                and (
+                    self.tools[self.search].get("parameters") == {"query": "string"}
+                    or self.tools[self.search].get("input_schema")
+                    == {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    }
+                )
             )
         )
         self.secrets: set[str] = set()
         self.active_secrets: set[str] = set()
         self.refresh_secrets()
 
+    def validate_connected_tool(self, tool: dict[str, Any]) -> None:
+        require(
+            set(tool)
+            == {
+                "connection",
+                "name",
+                "read_only",
+                "user_ids",
+                "bot_ids",
+                "input_schema",
+                "fixed_arguments",
+            }
+        )
+        require(isinstance(tool["connection"], str))
+        self.registry.profile(tool["connection"])
+        require(isinstance(tool["name"], str) and NAME.fullmatch(tool["name"]))
+        require(tool["read_only"] is True)
+        for key, roster in (("user_ids", self.users), ("bot_ids", self.bots)):
+            require(
+                isinstance(tool[key], list)
+                and bool(tool[key])
+                and all(type(i) is int and i in roster for i in tool[key])
+            )
+        schema = tool["input_schema"]
+        checked_schema(schema)
+        require(schema.get("type") == "object" and schema.get("additionalProperties") is False)
+        fixed = tool["fixed_arguments"]
+        require(isinstance(fixed, dict) and not set(fixed) & set(schema.get("properties", {})))
+        bounded(fixed)
+
     def refresh_secrets(self) -> None:
         self.secrets.clear()
         self.secrets.update(self.memory.credentials())
         for tool in self.tools.values():
-            name = tool["credential_env"]
+            name = tool.get("credential_env")
             if name:
                 value = os.environ.get(name)
+                if value:
+                    self.secrets.add(value)
+        for profile in self.registry.export()["servers"].values():
+            refs = profile["credential_env"]
+            for name in refs.values() if isinstance(refs, dict) else [refs]:
+                value = os.environ.get(name) if name else None
                 if value:
                     self.secrets.add(value)
 
@@ -188,6 +242,10 @@ class Capabilities:
             if message.author.id not in tool["user_ids"] or bot_id not in tool["bot_ids"]:
                 raise CapabilityError("Tool access denied")
             values = request.arguments
+            if "connection" in tool:
+                validate(values, tool["input_schema"])
+                self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
+                return request
             if not isinstance(values, dict) or set(values) != set(tool["parameters"]):
                 raise CapabilityError("Invalid MCP arguments")
             for name, kind in tool["parameters"].items():
@@ -216,7 +274,7 @@ class Capabilities:
             if request.name != "web":
                 values = {**self.tools[request.name]["fixed_arguments"], **values}
             # Check actual scalar values before JSON escaping can hide quotes/newlines.
-            arguments = tuple(str(value) for value in values.values())
+            arguments = tuple(bounded(values))
             filtered = await asyncio.to_thread(privacy.filter_many, *arguments)
             if arguments != filtered or any(self.redact(value) != value for value in arguments):
                 raise CapabilityError("Private arguments denied")
@@ -225,22 +283,14 @@ class Capabilities:
                     text = await self.http.page(request.arguments["url"])
                 else:
                     tool = self.tools[request.name]
-                    credential = (
-                        os.environ.get(tool["credential_env"]) if tool["credential_env"] else None
-                    )
-                    if tool["credential_env"] and not credential:
-                        raise CapabilityError("MCP credential unavailable")
-                    if credential:
-                        self.active_secrets.add(credential)
-                        if any(ord(c) < 33 or ord(c) > 126 for c in credential):
-                            raise CapabilityError("Invalid MCP credential")
-                    text = await MCPClient(
-                        self.http,
-                        tool["endpoint"],
-                        credential,
-                        protocol=tool["protocol"],
-                        secrets=self.active_secrets,
-                    ).call(tool["name"], values)
+                    if "connection" in tool:
+                        # Revalidate the request snapshot before transport dispatch.
+                        validate(request.arguments, tool["input_schema"])
+                        text = await self.connections.call(
+                            tool["connection"], tool["name"], values, self.active_secrets
+                        )
+                    else:
+                        text = await self.legacy_call(tool, values)
             text = await asyncio.to_thread(privacy.filter, self.redact(text))
             outcome = "completed"
             # JSON escaping clearly labels transport content. Permissions are outside the prompt.
@@ -255,3 +305,19 @@ class Capabilities:
             raise CapabilityError("Capability network request failed") from None
         finally:
             self.log(f"Capability {request.name} authorization=allowed outcome={outcome}")
+
+    async def legacy_call(self, tool: dict[str, Any], values: dict[str, Any]) -> str:
+        credential = os.environ.get(tool["credential_env"]) if tool["credential_env"] else None
+        if tool["credential_env"] and not credential:
+            raise CapabilityError("MCP credential unavailable")
+        if credential:
+            self.active_secrets.add(credential)
+            if any(ord(c) < 33 or ord(c) > 126 for c in credential):
+                raise CapabilityError("Invalid MCP credential")
+        return await MCPClient(
+            self.http,
+            tool["endpoint"],
+            credential,
+            protocol=tool["protocol"],
+            secrets=self.active_secrets,
+        ).call(tool["name"], values)

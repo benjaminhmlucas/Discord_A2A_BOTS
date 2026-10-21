@@ -1,5 +1,27 @@
 # Security controls and review policy
 
+## Generic local MCP connections (issue #26)
+
+Connection profiles and tool permissions are separate. The shared registry/manager
+does not inherit desktop MCP configuration or grant tools during discovery. Local
+stdio servers are explicitly installed/operator-selected executables, not sandboxes;
+their account-level OS access is outside a read-only annotation's guarantees. The
+owned Windows job/POSIX group bounds process lifetime; explicit pipe inheritance
+is tested on the real hidden Windows host. Only minimal OS settings plus configured
+environment/credential references reach the child; required helper executables need
+explicit configuration. The existing hidden Node preload also applies to these
+servers, but arbitrary native descendants require operator acceptance.
+
+Nested arguments use a bounded JSON Schema subset, with unsupported references,
+regular expressions and executable extensions denied. Both local and server schemas
+are enforced before dispatch; raw nested leaves/keys are privacy-checked before
+escaping. Stderr is privately drained and bounded, never copied into Discord errors.
+No OAuth/custom-header support (#27), UI (#24), mutating tools (#28) or full native
+installation portability (#25) is claimed here. See [mcp-connections.md](mcp-connections.md)
+for limits, migration, shared API, verification boundaries and per-server acceptance.
+
+## Repository protections
+
 Configure the default branch to require a pull request, one independent approval of the latest
 push, dismissal of stale approvals, resolved conversations, an up-to-date branch,
 and passing required checks. There is no bypass list. Deletion and force pushes are
