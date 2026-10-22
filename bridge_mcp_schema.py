@@ -20,7 +20,8 @@ TYPES = {
     "null": type(None),
 }
 JSON_ARGUMENT_BYTES = 65536
-LEGACY_ARGUMENT_BYTES = 196608  # Covers the original 16 scalar fields plus fixed UTF-8 text.
+# 16*2048*6 escaped dynamic bytes + 4096*4 fixed UTF-8 bytes + keys/syntax < 256 KiB.
+LEGACY_ARGUMENT_BYTES = 262144
 KEYWORDS = {
     "type",
     "properties",

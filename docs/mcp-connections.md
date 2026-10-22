@@ -163,11 +163,14 @@ Each profile is at most 16 KiB. Argument graphs are at most six levels, 32 objec
 members/array items per container, 256 privacy leaves and 64 KiB encoded JSON; scalar
 text is at most 4096 characters. Legacy dynamic parameters retain their separate
 2048-character admission limit, while existing fixed arguments can use the original
-4096-character aggregate bound. Scalar aliases have a separate finite 192 KiB UTF-8
+4096-character aggregate bound. Scalar aliases have a separate finite 256 KiB serialized UTF-8
 argument-envelope bound to preserve the original maximum multibyte inputs; nested
 schema aliases retain the 64 KiB bound. Both privacy traversal and remote-schema
 validation use the applicable bound. Schema text is at most 16 KiB, with at most eight
-`anyOf` choices and 16 enum values. Local aliases forbid unknown dynamic top-level
+`anyOf` choices and 16 enum values. The legacy byte allowance covers up to
+`16 * 2048 * 6` JSON-escaped dynamic bytes, `4096 * 4` fixed UTF-8 bytes and
+bounded ASCII key/syntax overhead. Malformed Unicode still fails closed.
+Local aliases forbid unknown dynamic top-level
 arguments; nested additional-field behavior follows the explicit schema.
 
 Each operation has a 15-second deadline and up to two seconds for cleanup. Manager
@@ -204,3 +207,16 @@ not permission to start it or generate images. Test each independent profile.
 Record controlled consumer fixtures separately from actual Discord delivery and
 provider inference. No live capability enablement, image generation, model/node
 installation or service changes follow from passing fixture tests.
+
+### Ticket acceptance map
+
+| AC | Implementation and evidence |
+| --- | --- |
+| 1: compatibility and denied configurations | Registry/profile validation and copy-only migration; real HTTP legacy/migrated calls, strict scalar boundaries, multibyte/escape envelopes and invalid-profile tests. |
+| 2: independent stdio and HTTP consumers | Real subprocess lifecycle/profile tests and connection-backed HTTP initialization through `Bridge.handle`; separately recorded metadata-only calls to both selected Comfy profiles. |
+| 3: shared policy and management | CLI/registry/runtime tests cover the same validators, exclusive exports, scopes, discovery without calls, busy status and owned sessions. |
+| 4: nested schema and injection bounds | `test_mcp_schema.py` plus actual consumer, annotation-veto and untrusted-definition/result regressions. |
+| 5: failure, cancellation and cleanup | Independent stdio/socket peers exercise malformed frames, stderr/output limits, failed launch, cancellation/backpressure, reconnect and actual child cleanup. OS failure/driver tests inject only the OS boundary and retain the real manager/transport. |
+| 6: privacy and credentials | Real bearer/session discovery reflection and stdio credential-echo tests verify filtering before provider input, public output and audit; private nested arguments are denied before dispatch. |
+| 7: selected real-server acceptance | Record protocol/server versions, exact approved metadata tool, reported backend state and cleanup for each profile; distinguish synthetic Discord/provider transports from live delivery. |
+| 8: review and validation | The unchanged exact coverage gates require every shipped Python statement/branch and applicable JavaScript line/branch/function. PR evidence records the tested head, CI, audits and independent agent review; human approval remains separate. |

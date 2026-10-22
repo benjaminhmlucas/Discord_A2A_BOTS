@@ -334,7 +334,7 @@ def test_reflected_bearer_and_session_are_redacted_before_cli_json(tmp_path):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("character", ["x", "\U0001f600"])
+@pytest.mark.parametrize("character", ["x", "\U0001f600", "\x01"])
 def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path, character):
     (tmp_path / "MEMORY.md").write_text("public")
 
@@ -342,7 +342,9 @@ def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path, 
         async with FixtureServer() as server:
             config = config_for(server.origin)
             tool = config["capabilities"]["tools"]["lookup"]
-            tool["fixed_arguments"] = {"scope": character * 3000}
+            # Control escapes count toward the original fixed JSON bound; keep that
+            # config valid while filling the dynamic fields to their independent cap.
+            tool["fixed_arguments"] = {"scope": ("x" if character == "\x01" else character) * 3000}
             tool["parameters"] = {f"q{i}": "string" for i in range(16)}
             config["capabilities"]["search"] = None
             args = {f"q{i}": character * 2048 for i in range(16)}
@@ -535,6 +537,35 @@ def test_already_reaped_process_needs_no_windows_kill(tmp_path):
         with patch.object(stdio, "WINDOWS", True):
             await manager.disconnect("first")
         assert not manager._active and client.process is None
+
+    asyncio.run(scenario())
+
+
+def test_stdio_credential_echo_is_absent_from_provider_public_reply_and_audit(tmp_path):
+    (tmp_path / "MEMORY.md").write_text("public synthetic context")
+    (tmp_path / "public_context.md").write_text("public context")
+
+    async def scenario():
+        config = configured(tmp_path, "credential_echo")
+        config["capabilities"]["connections"]["servers"]["first"]["credential_env"] = {
+            "FIXTURE_TOKEN": TOKEN_ENV
+        }
+        logs, prompts = [], []
+
+        async def provider(prompt, work=False):
+            prompts.append(prompt)
+            return json.dumps({"decision": "stop", "reply": CANARY})
+
+        with patch.dict(os.environ, {TOKEN_ENV: CANARY}):
+            bridge = Bridge(Client(C), C, provider, logs.append, tmp_path, tmp_path, config=config)
+            channel = Channel()
+            await bridge.handle(
+                Message(1, f'<@{C}> /mcp lookup {{"payload":{{"names":[]}}}}', channel)
+            )
+        public = "\n".join(m.content for m, _ in channel.sent)
+        assert prompts and CANARY not in prompts[0] and "REDACTED CREDENTIAL" in prompts[0]
+        assert CANARY not in public and "REDACTED CREDENTIAL" in public
+        assert CANARY not in "\n".join(logs)
 
     asyncio.run(scenario())
 

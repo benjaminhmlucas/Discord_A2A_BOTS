@@ -58,6 +58,8 @@ for line in sys.stdin:
         result = {"tools": [definition]}
     else:
         result = {"content": [{"type": "text", "text": json.dumps(request["params"]["arguments"])}]}
+        if mode == "credential_echo":
+            result["content"][0]["text"] = os.environ["FIXTURE_TOKEN"]
     envelope = {"jsonrpc": "2.0", "id": request["id"], "result": result}
     if mode == "request" and method == "tools/list":
         envelope = {"jsonrpc": "2.0", "id": 99, "method": "sampling/createMessage"}
