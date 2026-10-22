@@ -334,17 +334,18 @@ def test_reflected_bearer_and_session_are_redacted_before_cli_json(tmp_path):
     asyncio.run(scenario())
 
 
-def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path):
+@pytest.mark.parametrize("character", ["x", "\U0001f600"])
+def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path, character):
     (tmp_path / "MEMORY.md").write_text("public")
 
     async def scenario():
         async with FixtureServer() as server:
             config = config_for(server.origin)
             tool = config["capabilities"]["tools"]["lookup"]
-            tool["fixed_arguments"] = {"scope": "x" * 3000}
+            tool["fixed_arguments"] = {"scope": character * 3000}
             tool["parameters"] = {f"q{i}": "string" for i in range(16)}
             config["capabilities"]["search"] = None
-            args = {f"q{i}": "x" * 2048 for i in range(16)}
+            args = {f"q{i}": character * 2048 for i in range(16)}
             for current in (config, migrated(config)):
                 caps = Capabilities(current, lambda _: None)
                 request = caps.authorize(
@@ -404,6 +405,44 @@ def test_migration_keeps_exact_scalar_admission_boundaries(tmp_path):
         f"n{i}": "integer" for i in range(16)
     }
     Capabilities(migrated(config), lambda _: None)
+
+
+def test_connection_backed_http_initializes_and_calls_through_consumer(tmp_path):
+    (tmp_path / "MEMORY.md").write_text("public synthetic context")
+    (tmp_path / "public_context.md").write_text("public context")
+
+    async def scenario():
+        async with FixtureServer() as server:
+            server.legacy = True
+            original = config_for(server.origin)
+            original["capabilities"]["tools"]["lookup"]["protocol"] = "2025-11-25"
+            config = migrated(original)
+            prompts = []
+
+            async def provider(prompt, work=False):
+                prompts.append(prompt)
+                return json.dumps({"decision": "stop", "reply": "public answer"})
+
+            bridge = Bridge(
+                Client(C), C, provider, lambda _: None, tmp_path, tmp_path, config=config
+            )
+            channel = Channel()
+            await bridge.handle(Message(1, f"<@{C}> /search topic", channel))
+            assert (
+                len(prompts) == 1
+                and "public answer" in prompts[0]
+                and "untrusted data" in prompts[0]
+            )
+            assert [body["method"] for body, _ in server.calls] == [
+                "initialize",
+                "notifications/initialized",
+                "tools/list",
+                "tools/call",
+            ]
+            assert bridge.capabilities.connections.status("legacy.lookup")["outcome"] == "completed"
+            assert not bridge.capabilities.connections.status("legacy.lookup")["connected"]
+
+    asyncio.run(scenario())
 
 
 def test_failed_os_termination_retains_owner_for_real_retry(tmp_path):
@@ -476,6 +515,26 @@ def test_cancelled_cleanup_task_keeps_ownership_until_retry(tmp_path):
         assert manager._active["first"] is client
         await manager.disconnect("first")
         assert process.returncode is not None and not manager._active
+
+    asyncio.run(scenario())
+
+
+def test_already_reaped_process_needs_no_windows_kill(tmp_path):
+    import bridge_mcp_stdio as stdio
+
+    async def scenario():
+        manager = Capabilities(configured(tmp_path), lambda _: None).connections
+        client = await manager.connect("first", set())
+        process = client.process
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(process.pid, stdio.signal.SIGKILL)
+        await process.wait()
+        # Native process already gone; this driver branch must not kill a recycled PID.
+        with patch.object(stdio, "WINDOWS", True):
+            await manager.disconnect("first")
+        assert not manager._active and client.process is None
 
     asyncio.run(scenario())
 

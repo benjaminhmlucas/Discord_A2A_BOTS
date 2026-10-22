@@ -16,7 +16,13 @@ from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_mcp import MCPClient, PROTOCOL, LEGACY_PROTOCOL
 from bridge_memory import MemoryAccess, MemoryRequest
 from bridge_connections import Registry, ConnectionManager
-from bridge_mcp_schema import bounded, checked_schema, validate
+from bridge_mcp_schema import (
+    bounded,
+    checked_schema,
+    validate,
+    JSON_ARGUMENT_BYTES,
+    LEGACY_ARGUMENT_BYTES,
+)
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
 ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
@@ -282,7 +288,12 @@ class Capabilities:
             if request.name != "web":
                 values = {**self.tools[request.name]["fixed_arguments"], **values}
             # Check actual scalar values before JSON escaping can hide quotes/newlines.
-            arguments = tuple(bounded(values))
+            argument_limit = (
+                LEGACY_ARGUMENT_BYTES
+                if request.name != "web" and "parameters" in self.tools[request.name]
+                else JSON_ARGUMENT_BYTES
+            )
+            arguments = tuple(bounded(values, max_bytes=argument_limit))
             filtered = await asyncio.to_thread(privacy.filter_many, *arguments)
             if arguments != filtered or any(self.redact(value) != value for value in arguments):
                 raise CapabilityError("Private arguments denied")
@@ -295,7 +306,11 @@ class Capabilities:
                         # Revalidate the request snapshot before transport dispatch.
                         self.validate_arguments(tool, request.arguments)
                         text = await self.connections.call(
-                            tool["connection"], tool["name"], values, self.active_secrets
+                            tool["connection"],
+                            tool["name"],
+                            values,
+                            self.active_secrets,
+                            max_argument_bytes=argument_limit,
                         )
                     else:
                         text = await self.legacy_call(tool, values)
@@ -328,4 +343,4 @@ class Capabilities:
             credential,
             protocol=tool["protocol"],
             secrets=self.active_secrets,
-        ).call(tool["name"], values)
+        ).call(tool["name"], values, max_argument_bytes=LEGACY_ARGUMENT_BYTES)

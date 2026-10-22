@@ -19,6 +19,8 @@ TYPES = {
     "boolean": bool,
     "null": type(None),
 }
+JSON_ARGUMENT_BYTES = 65536
+LEGACY_ARGUMENT_BYTES = 196608  # Covers the original 16 scalar fields plus fixed UTF-8 text.
 KEYWORDS = {
     "type",
     "properties",
@@ -59,10 +61,13 @@ def values(value: Any, depth: int = 0) -> list[str]:
     return [str(value)]
 
 
-def bounded(value: Any) -> list[str]:
+def bounded(value: Any, *, max_bytes: int = JSON_ARGUMENT_BYTES) -> list[str]:
     try:
         leaves = values(value)
-        if len(leaves) > 256 or len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 65536:
+        if (
+            len(leaves) > 256
+            or len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > max_bytes
+        ):
             raise CapabilityError("MCP JSON size exceeded")
         return leaves
     except (ValueError, UnicodeError) as exc:
@@ -161,8 +166,8 @@ def checked_schema(schema: Any) -> None:
         raise CapabilityError("Invalid MCP input schema") from None
 
 
-def validate(value: Any, schema: Any) -> None:
-    bounded(value)
+def validate(value: Any, schema: Any, *, max_bytes: int = JSON_ARGUMENT_BYTES) -> None:
+    bounded(value, max_bytes=max_bytes)
     checked_schema(schema)
     if not matches(value, schema):
         raise CapabilityError("MCP arguments do not match schema")

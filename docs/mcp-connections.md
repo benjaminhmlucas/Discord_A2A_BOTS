@@ -163,7 +163,10 @@ Each profile is at most 16 KiB. Argument graphs are at most six levels, 32 objec
 members/array items per container, 256 privacy leaves and 64 KiB encoded JSON; scalar
 text is at most 4096 characters. Legacy dynamic parameters retain their separate
 2048-character admission limit, while existing fixed arguments can use the original
-4096-character aggregate bound. Schema text is at most 16 KiB, with at most eight
+4096-character aggregate bound. Scalar aliases have a separate finite 192 KiB UTF-8
+argument-envelope bound to preserve the original maximum multibyte inputs; nested
+schema aliases retain the 64 KiB bound. Both privacy traversal and remote-schema
+validation use the applicable bound. Schema text is at most 16 KiB, with at most eight
 `anyOf` choices and 16 enum values. Local aliases forbid unknown dynamic top-level
 arguments; nested additional-field behavior follows the explicit schema.
 

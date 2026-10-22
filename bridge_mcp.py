@@ -9,7 +9,7 @@ from typing import Any, cast
 import aiohttp
 
 from bridge_http import CapabilityError, SafeHTTP
-from bridge_mcp_schema import validate
+from bridge_mcp_schema import validate, JSON_ARGUMENT_BYTES
 
 PROTOCOL = "2026-07-28"
 LEGACY_PROTOCOL = "2025-11-25"
@@ -150,10 +150,12 @@ class MCPClient:
                 raise CapabilityError("MCP protocol mismatch")
             await self.rpc("notifications/initialized", {}, None)
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> str:
+    async def call(
+        self, name: str, arguments: dict[str, Any], *, max_argument_bytes: int = JSON_ARGUMENT_BYTES
+    ) -> str:
         try:
             await self.connect()
-            return await self.tool_call(name, arguments)
+            return await self.tool_call(name, arguments, max_argument_bytes=max_argument_bytes)
         finally:
             await self.disconnect()
 
@@ -203,7 +205,9 @@ class MCPClient:
                 raise CapabilityError("Invalid MCP discovery cursor")
         raise CapabilityError("MCP discovery limit reached")
 
-    async def tool_call(self, name: str, arguments: dict[str, Any]) -> str:
+    async def tool_call(
+        self, name: str, arguments: dict[str, Any], *, max_argument_bytes: int = JSON_ARGUMENT_BYTES
+    ) -> str:
         # Descriptions, annotations and server instructions cannot add tools or permissions.
         cursor, definition = None, None
         for _ in range(3):
@@ -237,7 +241,7 @@ class MCPClient:
         # Fail closed rather than sending arguments with incomplete protocol headers.
         if '"x-mcp-header"' in json.dumps(definition.get("inputSchema", {})):
             raise CapabilityError("MCP header schema unsupported")
-        validate(arguments, definition.get("inputSchema", {}))
+        validate(arguments, definition.get("inputSchema", {}), max_bytes=max_argument_bytes)
         result = await self.rpc(
             "tools/call", {"name": name, "arguments": arguments}, secrets.randbits(53)
         )

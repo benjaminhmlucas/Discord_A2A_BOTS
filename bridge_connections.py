@@ -14,6 +14,7 @@ from typing import Any
 from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_mcp import MCPClient, LEGACY_PROTOCOL, PROTOCOL
 from bridge_mcp_stdio import StdioClient
+from bridge_mcp_schema import JSON_ARGUMENT_BYTES
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
 ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
@@ -239,8 +240,14 @@ class ConnectionManager:
             return await client.discover()
 
     async def call(
-        self, name: str, tool: str, arguments: dict[str, Any], credentials: set[str]
+        self,
+        name: str,
+        tool: str,
+        arguments: dict[str, Any],
+        credentials: set[str],
+        *,
+        max_argument_bytes: int = JSON_ARGUMENT_BYTES,
     ) -> str:
         # Caller must authorize this explicit tool and its arguments before entering.
         async with self.session(name, credentials) as client:
-            return await client.tool_call(tool, arguments)
+            return await client.tool_call(tool, arguments, max_argument_bytes=max_argument_bytes)
