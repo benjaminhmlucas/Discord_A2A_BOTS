@@ -73,6 +73,9 @@ For 7.0.4, the published module installer and God monitoring implementation are
 unchanged from 7.0.1; the Client and socket-path changes remove unused win64 checks.
 The actual Windows lifecycle test also disables the metadata flag and checks that
 ordinary process monitoring still returns numeric CPU and memory measurements.
+Both npm graphs pin `ip-address` 10.7.4 to address
+[GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5);
+this changes the transitive parser while retaining PM2 7.0.4.
 The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 
