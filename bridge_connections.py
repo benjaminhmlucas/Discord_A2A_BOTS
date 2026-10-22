@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,9 +11,8 @@ import re
 from typing import Any
 
 from bridge_http import CapabilityError, SafeHTTP, checked_url
-from bridge_mcp import MCPClient, LEGACY_PROTOCOL, PROTOCOL
+from bridge_mcp import MCPClient, PROTOCOL_2025, PROTOCOL
 from bridge_mcp_stdio import StdioClient
-from bridge_mcp_schema import JSON_ARGUMENT_BYTES
 
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
 ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
@@ -32,7 +30,7 @@ def checked_profile(profile: Any, http: SafeHTTP) -> None:
     if profile.get("transport") == "http":
         require(set(profile) == {"transport", "endpoint", "protocol", "credential_env"})
         checked_url(profile["endpoint"], http.internal_origins)
-        require(profile["protocol"] in (PROTOCOL, LEGACY_PROTOCOL))
+        require(profile["protocol"] in (PROTOCOL, PROTOCOL_2025))
         ref = profile["credential_env"]
         require(ref is None or isinstance(ref, str) and ENV_NAME.fullmatch(ref))
     else:
@@ -48,7 +46,9 @@ def checked_profile(profile: Any, http: SafeHTTP) -> None:
                 and "\0" not in profile[key]
             )
             require(Path(profile[key]).is_absolute())
-        require(Path(profile["command"]).suffix.lower() not in (".bat", ".cmd", ".ps1", ".sh"))
+        command = profile["command"]
+        require(command == command.rstrip(". "))
+        require(Path(command).suffix.lower() not in (".bat", ".cmd", ".ps1", ".sh"))
         args = profile["arguments"]
         require(isinstance(args, list) and len(args) <= 32)
         require(all(isinstance(a, str) and len(a) <= 2048 and "\0" not in a for a in args))
@@ -99,32 +99,6 @@ class Registry:
         return Registry(data, self.http)
 
 
-def migrated(config: dict[str, Any]) -> dict[str, Any]:
-    """Explicit copy-only conversion; original remains a rollback snapshot."""
-    result = copy.deepcopy(config)
-    data = result.setdefault("capabilities", {"enabled": False})
-    registry = data.setdefault("connections", {"version": 1, "servers": {}})
-    servers = registry["servers"]
-    for alias, tool in data.get("tools", {}).items():
-        if "connection" in tool:
-            continue
-        name = (
-            "legacy." + alias
-            if len(alias) <= 57
-            else "legacy." + hashlib.sha256(alias.encode()).hexdigest()[:32]
-        )
-        require(name not in servers)
-        servers[name] = {
-            "transport": "http",
-            **{k: tool[k] for k in ("endpoint", "protocol", "credential_env")},
-        }
-        tool["connection"] = name
-        # Preserve the exact legacy scalar policy, including integer string-length limits.
-        for key in ("endpoint", "protocol", "credential_env"):
-            del tool[key]
-    return result
-
-
 class ConnectionManager:
     def __init__(self, registry: Registry) -> None:
         self.registry = registry
@@ -155,6 +129,8 @@ class ConnectionManager:
 
     async def connect(self, name: str, credentials: set[str]) -> MCPClient:
         profile = self.registry.profile(name)
+        if self._states.get(name) == "cleanup_failed":
+            await self.disconnect(name)
         if name in self._active:
             raise CapabilityError("MCP connection already in use")
         client: MCPClient
@@ -213,7 +189,7 @@ class ConnectionManager:
                 self._states[name] = "disconnected"
         except BaseException:
             self._states[name] = "cleanup_failed"
-            raise  # Keep the owner reference available for an explicit retry.
+            raise  # Retain ownership; the next connect retries cleanup before replacement.
 
     @asynccontextmanager
     async def session(self, name: str, credentials: set[str]) -> AsyncIterator[MCPClient]:
@@ -245,9 +221,7 @@ class ConnectionManager:
         tool: str,
         arguments: dict[str, Any],
         credentials: set[str],
-        *,
-        max_argument_bytes: int = JSON_ARGUMENT_BYTES,
     ) -> str:
         # Caller must authorize this explicit tool and its arguments before entering.
         async with self.session(name, credentials) as client:
-            return await client.tool_call(tool, arguments, max_argument_bytes=max_argument_bytes)
+            return await client.tool_call(tool, arguments)

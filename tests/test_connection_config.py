@@ -45,6 +45,10 @@ def test_bad_registries(data):
         ("command", "\0bad"),
         ("command", "x" * 1025),
         ("command", str(Path.cwd() / "launch.cmd")),
+        ("command", str(Path.cwd() / "launch.cmd.")),
+        ("command", str(Path.cwd() / "launch.CMD ")),
+        ("command", str(Path.cwd() / "launch.bat. ")),
+        ("command", str(Path.cwd() / "launch.exe ")),
         ("arguments", {}),
         ("arguments", ["x"] * 33),
         ("arguments", [1]),
@@ -155,7 +159,7 @@ def test_connected_tools_cannot_relax_permissions(tmp_path, key, value):
         Capabilities(config, lambda _: None)
 
 
-def test_cli_real_profile_edits_migration_and_lifecycle(tmp_path, capsys):
+def test_cli_real_profile_edits_and_lifecycle(tmp_path, capsys):
     config = configured(tmp_path)
     source, profile = tmp_path / "config.json", tmp_path / "profile.json"
     source.write_text(json.dumps(config))
@@ -172,7 +176,6 @@ def test_cli_real_profile_edits_migration_and_lifecycle(tmp_path, capsys):
         ("add", "third"),
         ("edit", "first"),
         ("remove", "second"),
-        ("migrate", None),
     ):
         output = tmp_path / (action + ".json")
         command = args + [action] + ([name] if name else []) + ["--output", str(output)]
@@ -215,7 +218,7 @@ def test_cli_export_uses_runtime_validation_before_creating_output(tmp_path, cap
     source, output = tmp_path / "source.json", tmp_path / "proposed.json"
     source.write_text(json.dumps(config))
     original = source.read_bytes()
-    assert cli.main(["--config", str(source), "migrate", "--output", str(output)]) == 1
+    assert cli.main(["--config", str(source), "remove", "second", "--output", str(output)]) == 1
     assert not output.exists() and source.read_bytes() == original
     assert "Traceback" not in capsys.readouterr().err
 
@@ -236,3 +239,69 @@ def test_cli_deep_json_config_and_profile_have_static_errors(tmp_path, capsys):
         == 1
     )
     assert not output.exists() and "Traceback" not in capsys.readouterr().err
+
+
+def test_cli_add_edit_without_capabilities_preserves_optional_defaults(tmp_path, capsys):
+    from bridge_settings import validate_runtime_config
+
+    config = configured(tmp_path)
+    config.pop("capabilities")
+    defaults = {
+        "user_requests_per_minute": 6,
+        "bot_requests_per_minute": 30,
+        "bot_requests_per_day": 200,
+    }
+    for key in defaults:
+        config.pop(key, None)
+    validated = validate_runtime_config(config)
+    assert validated is not config and all(validated[k] == v for k, v in defaults.items())
+    source, profile = tmp_path / "source.json", tmp_path / "profile.json"
+    source.write_text(json.dumps(config))
+    original = source.read_bytes()
+    profile.write_text(json.dumps(stdio_profile(tmp_path)))
+    added, edited = tmp_path / "added.json", tmp_path / "edited.json"
+    for action, input_path, output in (("add", source, added), ("edit", added, edited)):
+        assert (
+            cli.main(
+                [
+                    "--config",
+                    str(input_path),
+                    action,
+                    "new",
+                    "--profile",
+                    str(profile),
+                    "--output",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+        exported = json.loads(output.read_text())
+        assert not any(key in exported for key in defaults)
+        assert exported["capabilities"]["enabled"] is False
+        assert exported["capabilities"]["connections"]["servers"]["new"] == stdio_profile(tmp_path)
+        assert source.read_bytes() == original
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--config", str(source), "migrate", "--output", str(tmp_path / "unused")])
+    assert error.value.code == 2 and not (tmp_path / "unused").exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_inline_and_parameters_tool_formats_are_rejected(tmp_path):
+    config = configured(tmp_path)
+    tool = config["capabilities"]["tools"]["lookup"]
+    tool.pop("connection")
+    tool.pop("input_schema")
+    tool.update(
+        endpoint="https://example.com/mcp",
+        protocol="2025-11-25",
+        credential_env=None,
+        parameters={"query": "string"},
+    )
+    with pytest.raises(ValueError):
+        Capabilities(config, lambda _: None)
+    tool["connection"] = "first"
+    for key in ("endpoint", "protocol", "credential_env"):
+        tool.pop(key)
+    with pytest.raises(ValueError):
+        Capabilities(config, lambda _: None)

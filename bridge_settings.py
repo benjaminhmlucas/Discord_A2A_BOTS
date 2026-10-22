@@ -45,6 +45,7 @@ def identity_ids(config):
 
 def validate_runtime_config(config, launch_ids=None):
     """One side-effect-free runtime/CLI validator; capabilities validate separately."""
+    config = dict(config)
     ids = identity_ids(config)
     identities = set(ids) if launch_ids is None else set(launch_ids)
     for key, default in {

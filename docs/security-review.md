@@ -18,7 +18,7 @@ are enforced before dispatch; raw nested leaves/keys are privacy-checked before
 escaping. Stderr is privately drained and bounded, never copied into Discord errors.
 No OAuth/custom-header support (#27), UI (#24), mutating tools (#28) or full native
 installation portability (#25) is claimed here. See [mcp-connections.md](mcp-connections.md)
-for limits, migration, shared API, verification boundaries and per-server acceptance.
+for limits, shared API, verification boundaries and per-server acceptance.
 
 ## Repository protections
 

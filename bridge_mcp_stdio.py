@@ -10,7 +10,7 @@ import sys
 from typing import Any, cast
 
 from bridge_http import CapabilityError, SafeHTTP
-from bridge_mcp import MCPClient, LEGACY_PROTOCOL, response_result
+from bridge_mcp import MCPClient, PROTOCOL_2025, response_result
 from scripts.console_windows import creation_flags
 
 ROOT = Path(__file__).resolve().parent
@@ -37,7 +37,7 @@ def child_environment(profile: dict[str, Any], credentials: set[str]) -> dict[st
 
 class StdioClient(MCPClient):
     def __init__(self, profile: dict[str, Any], credentials: set[str]) -> None:
-        super().__init__(SafeHTTP(), "", protocol=LEGACY_PROTOCOL, secrets=credentials)
+        super().__init__(SafeHTTP(), "", protocol=PROTOCOL_2025, secrets=credentials)
         self.profile = profile
         self.process: asyncio.subprocess.Process | None = None
         self.stderr_task: asyncio.Task[None] | None = None

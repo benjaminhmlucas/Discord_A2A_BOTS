@@ -1,4 +1,4 @@
-"""Offline profile editing/migration and bounded connection diagnostics.
+"""Offline profile editing and bounded connection diagnostics.
 
 Writes are exclusive new exports; replacing an active runtime configuration is an
 explicit operator deployment step. No inherited app sessions or automatic tools.
@@ -13,7 +13,6 @@ import sys
 import aiohttp
 
 from bridge_capabilities import Capabilities
-from bridge_connections import migrated
 from bridge_settings import validate_runtime_config
 
 
@@ -40,17 +39,14 @@ async def execute(args):
             # Names only: never print descriptions, schemas or server-supplied instructions.
             result["tools"] = [caps.redact(t["name"]) for t in tools]
         return result
-    if args.action == "migrate":
-        result = migrated(config)
-    else:
-        registry = caps.registry.changed(
-            args.action, args.name, read_json(args.profile) if args.action != "remove" else None
-        )
-        result = json.loads(json.dumps(config))
-        result["capabilities"]["connections"] = registry.export()
+    registry = caps.registry.changed(
+        args.action, args.name, read_json(args.profile) if args.action != "remove" else None
+    )
+    result = json.loads(json.dumps(config))
+    result.setdefault("capabilities", {"enabled": False})["connections"] = registry.export()
     validate_runtime_config(result)
     Capabilities(result, lambda _: None)
-    # Never overwrite a live config, rollback snapshot, symlink or concurrent export.
+    # Never overwrite a live config, symlink or concurrent export.
     with Path(args.output).open("x", encoding="utf-8") as destination:
         json.dump(result, destination, indent=2, ensure_ascii=False)
         destination.write("\n")
@@ -62,13 +58,12 @@ def main(argv=None):
     parser.add_argument("--config", required=True, help="Operator-owned bridge configuration")
     actions = parser.add_subparsers(dest="action", required=True)
     actions.add_parser("status")
-    for name in ("test", "discover", "add", "edit", "remove", "migrate"):
+    for name in ("test", "discover", "add", "edit", "remove"):
         action = actions.add_parser(name)
-        if name != "migrate":
-            action.add_argument("name")
+        action.add_argument("name")
         if name in ("add", "edit"):
             action.add_argument("--profile", required=True)
-        if name in ("add", "edit", "remove", "migrate"):
+        if name in ("add", "edit", "remove"):
             action.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     try:

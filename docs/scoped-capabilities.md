@@ -21,8 +21,8 @@ Use a numeric bot mention in the configured channel, followed by one command:
 `/web` fetches one page with GET. It does not execute scripts, load linked resources,
 use browser sessions or log into sites. `/search` calls the configured MCP search alias
 with a `query` string. `/mcp` selects a configured alias, never an arbitrary endpoint or
-tool name. Legacy HTTP aliases use required scalar strings, integers or booleans;
-connection-backed aliases also support bounded nested objects/arrays through explicit
+tool name. Every MCP alias references a connection and declares bounded scalar or
+nested object/array arguments through an explicit
 [input schemas](mcp-connections.md). Fixed arguments cannot be overridden. A command
 inside `/discuss`, `/work`, a quote or a tool result does not invoke this dispatcher.
 Discussion continuations cannot invoke capabilities. A bot reply beginning with one
@@ -41,17 +41,31 @@ verified for your read-only server before considering enablement:
   "enabled": false,
   "web": false,
   "internal_origins": [],
+  "connections": {
+    "version": 1,
+    "servers": {
+      "docs-server": {
+        "transport": "http",
+        "endpoint": "https://mcp.example.com/mcp",
+        "protocol": "2025-11-25",
+        "credential_env": "BOTBRIDGE_MCP_DOCS"
+      }
+    }
+  },
   "tools": {
     "docs": {
-      "endpoint": "https://mcp.example.com/mcp",
-      "protocol": "2025-11-25",
+      "connection": "docs-server",
       "name": "search_docs",
       "read_only": true,
       "user_ids": [123456789],
       "bot_ids": [987654321],
-      "parameters": {"query": "string"},
-      "fixed_arguments": {"collection": "public"},
-      "credential_env": "BOTBRIDGE_MCP_DOCS"
+      "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "fixed_arguments": {"collection": "public"}
     }
   },
   "search": "docs"
@@ -59,9 +73,10 @@ verified for your read-only server before considering enablement:
 ```
 
 User and bot IDs must also appear in the bridge's global allowlist and enabled roster.
-Every tool needs its own explicit user/bot scope. At most 32 aliases and 16 dynamic
-plus 16 fixed scalar arguments per tool are allowed; dynamic values are at most 2048
-characters. Search aliases must have exactly one dynamic parameter, `query: string`.
+Every tool needs its own explicit user/bot scope. At most 32 aliases are allowed;
+argument graphs share the [schema and size limits](mcp-connections.md).
+Search aliases require the exact query-only input schema shown above.
+The unreleased inline HTTP/`parameters` format is replaced, with no migration path.
 `credential_env: null` selects an unauthenticated server. Credential names must start
 with `BOTBRIDGE_MCP_` and use uppercase ASCII; existing Discord/provider credentials
 cannot be selected. Set the value in the bot process environment without committing it
@@ -143,13 +158,15 @@ daily allowance, queue capacity and per-bot execution lock. Daily capacity is ch
 when a capability attempt starts, before any network activity; its subsequent provider
 reply uses that same reservation. Capability failure/cancellation after that point stays
 charged. Cancellation or expiry while still queued gives the daily reservation back.
-Each operation has a 15-second total network deadline, a 64 KiB body limit per response,
+HTTP operations have a 15-second total network deadline, a 64 KiB body limit per response,
 three web redirects or three MCP discovery pages, and at most one MCP tool call.
-Legacy initialization/notification, cancellation signalling and session termination add
+2025-11-25 initialization/notification, cancellation signalling and session termination add
 protocol-only requests; cancellation and termination share at most two additional seconds,
 and cleanup does not mask a call failure. Bodies
 with compression are refused. Tool text supplied to providers is capped at 16000
-characters. Network I/O is asynchronous; privacy scans run off the event loop.
+characters. Stdio uses the separate framing/stderr bounds and owned lifecycle in
+[MCP connections](mcp-connections.md). Network I/O is asynchronous; privacy scans
+run off the event loop.
 
 Actual argument values are privacy-checked before JSON escaping or network dispatch.
 Tool output is checked against current private-memory rules and known scoped

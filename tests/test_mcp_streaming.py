@@ -8,8 +8,8 @@ import pytest
 from aiohttp import web
 
 from bridge_http import CapabilityError, SafeHTTP
-from bridge_mcp import MCPClient, LEGACY_PROTOCOL, PROTOCOL
-from test_capabilities import FixtureServer
+from bridge_mcp import MCPClient, PROTOCOL_2025, PROTOCOL
+from test_capabilities import call_client, FixtureServer
 
 
 class StreamingServer(FixtureServer):
@@ -80,9 +80,9 @@ def test_empty_primers_chunk_boundaries_and_result_before_eof(legacy, newline):
             server.legacy = legacy
             http = SafeHTTP(internal_origins=(server.origin,), seconds=1)
             client = MCPClient(
-                http, server.origin + "/mcp", protocol=LEGACY_PROTOCOL if legacy else PROTOCOL
+                http, server.origin + "/mcp", protocol=PROTOCOL_2025 if legacy else PROTOCOL
             )
-            assert await client.call("read_example", {}) == "public é answer"
+            assert await call_client(client, "read_example", {}) == "public é answer"
             assert server.open_streams == 2  # Neither server handler reached EOF.
             assert server.eof_writes == 0 and not server.release.is_set()
             assert not client.session and client.cancelled_request is None
@@ -120,9 +120,9 @@ def test_stream_validation_and_completed_request_boundary(payload, error):
             client = MCPClient(SafeHTTP(internal_origins=(server.origin,)), server.origin + "/mcp")
             if error:
                 with pytest.raises(CapabilityError, match=error):
-                    await client.call("read_example", {})
+                    await call_client(client, "read_example", {})
             else:
-                assert await client.call("read_example", {}) == "public é answer"
+                assert await call_client(client, "read_example", {}) == "public é answer"
 
     asyncio.run(scenario())
 
@@ -185,9 +185,9 @@ def test_active_request_cancellation_and_timeout_signal(legacy, session, stage, 
             server.legacy, server.session_id = legacy, session
             http = SafeHTTP(internal_origins=(server.origin,), seconds=0.08 if timeout else 1)
             client = MCPClient(
-                http, server.origin + "/mcp", protocol=LEGACY_PROTOCOL if legacy else PROTOCOL
+                http, server.origin + "/mcp", protocol=PROTOCOL_2025 if legacy else PROTOCOL
             )
-            task = asyncio.create_task(client.call("read_example", {}))
+            task = asyncio.create_task(call_client(client, "read_example", {}))
             await asyncio.wait_for(server.started.wait(), 1)
             if not timeout:
                 task.cancel()
@@ -212,8 +212,8 @@ def test_cancellation_cleanup_failure_is_bounded_and_preserves_original(notifica
         async with CancellationServer("tools/call", notification) as server:
             server.legacy = True
             http = SafeHTTP(internal_origins=(server.origin,), seconds=3)
-            client = MCPClient(http, server.origin + "/mcp", protocol=LEGACY_PROTOCOL)
-            task = asyncio.create_task(client.call("read_example", {}))
+            client = MCPClient(http, server.origin + "/mcp", protocol=PROTOCOL_2025)
+            task = asyncio.create_task(call_client(client, "read_example", {}))
             await asyncio.wait_for(server.started.wait(), 1)
             before = asyncio.get_running_loop().time()
             task.cancel()

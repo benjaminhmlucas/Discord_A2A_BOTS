@@ -13,20 +13,9 @@ from yarl import URL
 
 from bridge_authorization import eligible_sender
 from bridge_http import CapabilityError, SafeHTTP, checked_url
-from bridge_mcp import MCPClient, PROTOCOL, LEGACY_PROTOCOL
 from bridge_memory import MemoryAccess, MemoryRequest
-from bridge_connections import Registry, ConnectionManager
-from bridge_mcp_schema import (
-    bounded,
-    checked_schema,
-    validate,
-    JSON_ARGUMENT_BYTES,
-    LEGACY_ARGUMENT_BYTES,
-)
-
-NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,63}\Z")
-ENV_NAME = re.compile(r"BOTBRIDGE_MCP_[A-Z][A-Z0-9_]{0,49}\Z")
-KINDS = {"string": str, "integer": int, "boolean": bool}
+from bridge_connections import Registry, ConnectionManager, NAME
+from bridge_mcp_schema import bounded, checked_schema, validate
 
 
 def require(condition: object) -> None:
@@ -71,53 +60,20 @@ class Capabilities:
         require(isinstance(self.tools, dict) and len(self.tools) <= 32)
         for alias, tool in self.tools.items():
             require(isinstance(alias, str) and NAME.fullmatch(alias) and alias != "web")
-            if isinstance(tool, dict) and "connection" in tool:
-                self.validate_connected_tool(tool)
-                continue
-            require(
-                isinstance(tool, dict)
-                and set(tool)
-                == {
-                    "endpoint",
-                    "protocol",
-                    "name",
-                    "read_only",
-                    "user_ids",
-                    "bot_ids",
-                    "parameters",
-                    "fixed_arguments",
-                    "credential_env",
-                }
-            )
-            checked_url(tool["endpoint"], internal)
-            require(tool["protocol"] in (PROTOCOL, LEGACY_PROTOCOL))
-            require(isinstance(tool["name"], str) and NAME.fullmatch(tool["name"]))
-            require(tool["read_only"] is True)
-            for key, roster in (("user_ids", self.users), ("bot_ids", self.bots)):
-                require(
-                    isinstance(tool[key], list)
-                    and bool(tool[key])
-                    and all(type(i) is int and i in roster for i in tool[key])
-                )
-            self.validate_scalar_tool(tool)
-            env = tool["credential_env"]
-            require(env is None or (isinstance(env, str) and ENV_NAME.fullmatch(env)))
+            self.validate_connected_tool(tool)
         self.search = data.get("search")
         require(
             self.search is None
             or (
                 isinstance(self.search, str)
                 and self.search in self.tools
-                and (
-                    self.tools[self.search].get("parameters") == {"query": "string"}
-                    or self.tools[self.search].get("input_schema")
-                    == {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                        "additionalProperties": False,
-                    }
-                )
+                and self.tools[self.search]["input_schema"]
+                == {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                }
             )
         )
         self.secrets: set[str] = set()
@@ -125,16 +81,16 @@ class Capabilities:
         self.refresh_secrets()
 
     def validate_connected_tool(self, tool: dict[str, Any]) -> None:
-        dynamic = "parameters" if "parameters" in tool else "input_schema"
         require(
-            set(tool)
+            isinstance(tool, dict)
+            and set(tool)
             == {
                 "connection",
                 "name",
                 "read_only",
                 "user_ids",
                 "bot_ids",
-                dynamic,
+                "input_schema",
                 "fixed_arguments",
             }
         )
@@ -148,59 +104,16 @@ class Capabilities:
                 and bool(tool[key])
                 and all(type(i) is int and i in roster for i in tool[key])
             )
-        if dynamic == "parameters":
-            self.validate_scalar_tool(tool)
-            return
-        schema = tool[dynamic]
+        schema = tool["input_schema"]
         checked_schema(schema)
         require(schema.get("type") == "object" and schema.get("additionalProperties") is False)
         fixed = tool["fixed_arguments"]
         require(isinstance(fixed, dict) and not set(fixed) & set(schema.get("properties", {})))
         bounded(fixed)
 
-    def validate_scalar_tool(self, tool: dict[str, Any]) -> None:
-        require(isinstance(tool["parameters"], dict) and len(tool["parameters"]) <= 16)
-        for name, kind in tool["parameters"].items():
-            require(
-                isinstance(name, str)
-                and NAME.fullmatch(name)
-                and isinstance(kind, str)
-                and kind in KINDS
-            )
-        fixed = tool["fixed_arguments"]
-        require(
-            isinstance(fixed, dict)
-            and len(fixed) <= 16
-            and not set(fixed) & set(tool["parameters"])
-        )
-        require(
-            all(
-                isinstance(k, str) and NAME.fullmatch(k) and type(v) in KINDS.values()
-                for k, v in fixed.items()
-            )
-        )
-        require(len(json.dumps(fixed, ensure_ascii=False)) <= 4096)
-
-    def validate_arguments(self, tool: dict[str, Any], values: Any) -> None:
-        if "input_schema" in tool:
-            validate(values, tool["input_schema"])
-            return
-        if not isinstance(values, dict) or set(values) != set(tool["parameters"]):
-            raise CapabilityError("Invalid MCP arguments")
-        for name, kind in tool["parameters"].items():
-            value = values[name]
-            if type(value) is not KINDS[kind] or len(str(value)) > 2048:
-                raise CapabilityError("Invalid MCP arguments")
-
     def refresh_secrets(self) -> None:
         self.secrets.clear()
         self.secrets.update(self.memory.credentials())
-        for tool in self.tools.values():
-            name = tool.get("credential_env")
-            if name:
-                value = os.environ.get(name)
-                if value:
-                    self.secrets.add(value)
         for profile in self.registry.export()["servers"].values():
             refs = profile["credential_env"]
             for name in refs.values() if isinstance(refs, dict) else [refs]:
@@ -265,7 +178,7 @@ class Capabilities:
             tool = self.tools[request.name]
             if message.author.id not in tool["user_ids"] or bot_id not in tool["bot_ids"]:
                 raise CapabilityError("Tool access denied")
-            self.validate_arguments(tool, request.arguments)
+            validate(request.arguments, tool["input_schema"])
         self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
         return request
 
@@ -288,12 +201,7 @@ class Capabilities:
             if request.name != "web":
                 values = {**self.tools[request.name]["fixed_arguments"], **values}
             # Check actual scalar values before JSON escaping can hide quotes/newlines.
-            argument_limit = (
-                LEGACY_ARGUMENT_BYTES
-                if request.name != "web" and "parameters" in self.tools[request.name]
-                else JSON_ARGUMENT_BYTES
-            )
-            arguments = tuple(bounded(values, max_bytes=argument_limit))
+            arguments = tuple(bounded(values))
             filtered = await asyncio.to_thread(privacy.filter_many, *arguments)
             if arguments != filtered or any(self.redact(value) != value for value in arguments):
                 raise CapabilityError("Private arguments denied")
@@ -302,18 +210,11 @@ class Capabilities:
                     text = await self.http.page(request.arguments["url"])
                 else:
                     tool = self.tools[request.name]
-                    if "connection" in tool:
-                        # Revalidate the request snapshot before transport dispatch.
-                        self.validate_arguments(tool, request.arguments)
-                        text = await self.connections.call(
-                            tool["connection"],
-                            tool["name"],
-                            values,
-                            self.active_secrets,
-                            max_argument_bytes=argument_limit,
-                        )
-                    else:
-                        text = await self.legacy_call(tool, values)
+                    # Revalidate the request snapshot before transport dispatch.
+                    validate(request.arguments, tool["input_schema"])
+                    text = await self.connections.call(
+                        tool["connection"], tool["name"], values, self.active_secrets
+                    )
             text = await asyncio.to_thread(privacy.filter, self.redact(text))
             outcome = "completed"
             # JSON escaping clearly labels transport content. Permissions are outside the prompt.
@@ -328,19 +229,3 @@ class Capabilities:
             raise CapabilityError("Capability network request failed") from None
         finally:
             self.log(f"Capability {request.name} authorization=allowed outcome={outcome}")
-
-    async def legacy_call(self, tool: dict[str, Any], values: dict[str, Any]) -> str:
-        credential = os.environ.get(tool["credential_env"]) if tool["credential_env"] else None
-        if tool["credential_env"] and not credential:
-            raise CapabilityError("MCP credential unavailable")
-        if credential:
-            self.active_secrets.add(credential)
-            if any(ord(c) < 33 or ord(c) > 126 for c in credential):
-                raise CapabilityError("Invalid MCP credential")
-        return await MCPClient(
-            self.http,
-            tool["endpoint"],
-            credential,
-            protocol=tool["protocol"],
-            secrets=self.active_secrets,
-        ).call(tool["name"], values, max_argument_bytes=LEGACY_ARGUMENT_BYTES)

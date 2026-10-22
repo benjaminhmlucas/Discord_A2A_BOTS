@@ -44,7 +44,8 @@ Local connections instead contain these exact fields:
 
 Use native absolute Windows paths on Windows (escaped backslashes in JSON).
 The command must be an executable, not a `.cmd`, `.bat`, `.ps1` or `.sh` launcher;
-run an explicitly selected interpreter with the script as an argument if needed.
+paths ending in a dot or space are rejected to avoid Windows normalization ambiguity.
+Run an explicitly selected interpreter with the script as an argument if needed.
 This is an operator-selected program, not a sandbox: installing a malicious local
 server gives it the operating-system access of the bot account. Read-only tool
 policy cannot constrain what that program does internally.
@@ -91,11 +92,10 @@ global allowlist/enabled roster. The human command is still
 `<@BOT_ID> /mcp docs {"query":"topic"}`. The local input schema describes dynamic
 arguments; fixed top-level arguments must be disjoint. The merged arguments must
 also satisfy the server's declared input schema before `tools/call`.
-Search aliases use the exact query-only object schema shown above, or the existing
-`parameters: {"query": "string"}` scalar form. Connection-backed aliases may use
-either `input_schema` or `parameters`, never both. The scalar form retains its
-original required-field, strict-type and 2048-character scalar admission rules,
-including the sign in an integer's decimal representation.
+Search aliases use the exact query-only object schema shown above. Every tool must
+reference a connection and declare `input_schema`; inline endpoints and scalar
+`parameters` are rejected. This replaces the unreleased inline format. There is no
+migration command or second argument-validation path.
 
 Supported schema keywords are `type`, `properties`, `required`, boolean
 `additionalProperties`, `items`, `enum`, `anyOf`, `minLength`, `maxLength`,
@@ -134,7 +134,6 @@ Use this checkout's Python interpreter; Windows examples:
 .venv\Scripts\python.exe mcp_connections.py --config bridge_config.json add local-server --profile local-profile.json --output proposed-config.json
 .venv\Scripts\python.exe mcp_connections.py --config bridge_config.json edit local-server --profile revised-profile.json --output proposed-config-2.json
 .venv\Scripts\python.exe mcp_connections.py --config bridge_config.json remove local-server --output proposed-config-3.json
-.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json migrate --output migrated-config.json
 ```
 
 `status` reports this manager instance; a fresh CLI invocation has no connected
@@ -144,15 +143,12 @@ schemas. Diagnostic sessions disconnect before returning; output reports
 `connected: false` and the completed/failed outcome. Future long-lived callers can
 explicitly connect/disconnect through the shared API. No GUI/browser opens.
 
-Edits/migration validate the complete resulting bridge configuration and write
-only a **new** export, refusing to overwrite existing files. Review it and deploy
-through the normal stopped-service/update/restart procedure; no hot reload or
-live service action occurs. Retain the original ignored configuration for rollback.
-Migration converts legacy HTTP aliases into separate connection references while
-retaining the exact scalar `parameters` policy, scopes, fixed arguments and disabled
-state. It does not translate scalar limits into looser nested-schema permissions.
+Edits validate the complete resulting bridge configuration and write only a **new**
+export, refusing to overwrite existing files. Omitted optional runtime defaults stay
+omitted in exports. A configuration without `capabilities` can add its first profile;
+capabilities remain disabled. Review the export before the normal stopped-service
+update/restart procedure; no hot reload or live service action occurs.
 Removing a referenced connection is rejected until its aliases are changed/removed.
-No migration is required to continue using the original HTTP alias format.
 
 ## Bounds and lifecycle
 
@@ -161,15 +157,9 @@ map, 1024 characters per
 executable/working-directory path and 2048 characters per launch argument/value.
 Each profile is at most 16 KiB. Argument graphs are at most six levels, 32 object
 members/array items per container, 256 privacy leaves and 64 KiB encoded JSON; scalar
-text is at most 4096 characters. Legacy dynamic parameters retain their separate
-2048-character admission limit, while existing fixed arguments can use the original
-4096-character aggregate bound. Scalar aliases have a separate finite 256 KiB serialized UTF-8
-argument-envelope bound to preserve the original maximum multibyte inputs; nested
-schema aliases retain the 64 KiB bound. Both privacy traversal and remote-schema
-validation use the applicable bound. Schema text is at most 16 KiB, with at most eight
-`anyOf` choices and 16 enum values. The legacy byte allowance covers up to
-`16 * 2048 * 6` JSON-escaped dynamic bytes, `4096 * 4` fixed UTF-8 bytes and
-bounded ASCII key/syntax overhead. Malformed Unicode still fails closed.
+text is at most 4096 characters. All aliases use the same 64 KiB argument bound for
+privacy traversal and remote schema validation. Schema text is at most 16 KiB, with
+at most eight `anyOf` choices and 16 enum values. Malformed Unicode fails closed.
 Local aliases forbid unknown dynamic top-level
 arguments; nested additional-field behavior follows the explicit schema.
 
@@ -181,10 +171,15 @@ at 64 KiB per session. Discovery is at most three pages and 256 unique names.
 HTTP retains its 64 KiB response cap. Tool text still goes through the existing
 privacy/result-length limits before a provider sees it.
 
+Each runtime operation starts a fresh stdio server, so startup/initialization cost
+is paid per call. This deliberately bounds session state and child lifetime; the
+shared API also supports explicit connect/disconnect for a trusted long-lived caller.
 Sessions own their child processes and clean up on failure, timeout, cancellation
 and completion. The Windows host uses a private kill-on-close job; POSIX uses an
 owned process group. Stdio cancellation signals the active request best-effort,
-then terminates the owned tree. HTTP cancellation cannot prove remote work stopped.
+then terminates the owned tree. A failed cleanup retains ownership; the next connection attempt retries cleanup
+before any replacement starts. Repeated cleanup failure stays visible and never
+starts a second server. HTTP cancellation cannot prove remote work stopped.
 Windows host/server launches are hidden by default and honor
 `BOTBRIDGE_SHOW_CONSOLE=1`. The Node preload hides supported Node child launches;
 an arbitrary server can use native launch APIs of its own, so visible descendants
@@ -194,7 +189,7 @@ must be checked during acceptance. Full native installation portability remains 
 
 `test_connections.py` runs actual subprocesses and HTTP servers through the real
 manager and Discord consumer. `test_connection_config.py` exercises the actual
-registry/CLI, validation, migration and exclusive exports. `test_mcp_schema.py`
+registry/CLI, validation and exclusive exports. `test_mcp_schema.py`
 covers schema/argument admission. `test_mcp_host.py` executes the real host and
 merges child coverage, checking inherited pipes and exit codes without assigning
 the test runner to a process job. OS fault adapters may be substituted in focused
@@ -212,7 +207,7 @@ installation or service changes follow from passing fixture tests.
 
 | AC | Implementation and evidence |
 | --- | --- |
-| 1: compatibility and denied configurations | Registry/profile validation and copy-only migration; real HTTP legacy/migrated calls, strict scalar boundaries, multibyte/escape envelopes and invalid-profile tests. |
+| 1: one configuration format | Every tool uses a connection and input_schema; former inline/parameters formats and the migrate command are rejected. Registry/profile and actual HTTP/stdio tests cover valid configuration and bounded failures. |
 | 2: independent stdio and HTTP consumers | Real subprocess lifecycle/profile tests and connection-backed HTTP initialization through `Bridge.handle`; separately recorded metadata-only calls to both selected Comfy profiles. |
 | 3: shared policy and management | CLI/registry/runtime tests cover the same validators, exclusive exports, scopes, discovery without calls, busy status and owned sessions. |
 | 4: nested schema and injection bounds | `test_mcp_schema.py` plus actual consumer, annotation-veto and untrusted-definition/result regressions. |

@@ -14,9 +14,7 @@ import argparse
 import pytest
 
 from bridge_capabilities import Capabilities
-from bridge_connections import migrated
 from bridge_http import CapabilityError
-from bridge_privacy import Privacy
 from test_capabilities import config_for, FixtureServer, C, A, OWNER, CANARY, TOKEN_ENV
 from test_bridge import Bridge, Channel, Client, Message, Author
 import mcp_connections as cli
@@ -187,30 +185,6 @@ def test_minimal_environment_and_credentials(tmp_path):
     asyncio.run(scenario())
 
 
-def test_legacy_migration_real_http_and_configuration_rollback(tmp_path):
-    (tmp_path / "MEMORY.md").write_text("public fixture memory")
-
-    async def scenario():
-        async with FixtureServer() as server:
-            original = config_for(server.origin)
-            snapshot = copy.deepcopy(original)
-            updated = migrated(original)
-            assert original == snapshot and migrated(updated) == updated
-            caps = Capabilities(updated, lambda _: None)
-            request = caps.authorize("/search topic", Message(1, "", Channel()), C)
-            assert "public answer" in await caps.execute(request, Privacy(tmp_path))
-            assert not caps.connections.status("legacy.lookup")["connected"]
-            assert len(server.calls) == 2
-            assert (
-                migrated({"capabilities": {"enabled": False}})["capabilities"]["connections"][
-                    "version"
-                ]
-                == 1
-            )
-
-    asyncio.run(scenario())
-
-
 def alive(pid):
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -275,27 +249,27 @@ def test_owned_child_cleanup_timeout_cancellation_and_reconnect(tmp_path):
 def test_http_manager_credentials_discovery_and_scoped_busy_session(tmp_path):
     async def scenario():
         async with FixtureServer() as server:
-            config = migrated(config_for(server.origin, TOKEN_ENV))
+            config = config_for(server.origin, TOKEN_ENV)
             caps = Capabilities(config, lambda _: None)
             manager = caps.connections
             with (
                 patch.dict(os.environ, {TOKEN_ENV: ""}),
                 pytest.raises(CapabilityError, match="unavailable"),
             ):
-                await manager.discover("legacy.lookup")
+                await manager.discover("fixture")
             with (
                 patch.dict(os.environ, {TOKEN_ENV: "bad\nvalue"}),
                 pytest.raises(CapabilityError, match="Invalid MCP credential"),
             ):
-                await manager.discover("legacy.lookup")
+                await manager.discover("fixture")
             with patch.dict(os.environ, {TOKEN_ENV: CANARY}):
-                client = await manager.connect("legacy.lookup", set())
+                client = await manager.connect("fixture", set())
                 with pytest.raises(CapabilityError, match="already in use"):
-                    async with manager.session("legacy.lookup", set()):
+                    async with manager.session("fixture", set()):
                         pass
-                assert manager._active["legacy.lookup"] is client
-                assert manager.status("legacy.lookup")["connected"] is True
-                assert manager.status("legacy.lookup")["outcome"] == "connected"
+                assert manager._active["fixture"] is client
+                assert manager.status("fixture")["connected"] is True
+                assert manager.status("fixture")["outcome"] == "connected"
                 for listing in (
                     {},
                     {"tools": [1]},
@@ -308,7 +282,7 @@ def test_http_manager_credentials_discovery_and_scoped_busy_session(tmp_path):
                     server.list_result = listing
                     with pytest.raises(CapabilityError):
                         await client.discover()
-                await manager.disconnect("legacy.lookup")
+                await manager.disconnect("fixture")
 
     asyncio.run(scenario())
 
@@ -318,43 +292,18 @@ def test_reflected_bearer_and_session_are_redacted_before_cli_json(tmp_path):
         async with FixtureServer() as server:
             server.legacy = True
             config = config_for(server.origin, TOKEN_ENV)
-            config["capabilities"]["tools"]["lookup"]["protocol"] = "2025-11-25"
+            config["capabilities"]["connections"]["servers"]["fixture"]["protocol"] = "2025-11-25"
             source = tmp_path / "config.json"
-            source.write_text(json.dumps(migrated(config)))
+            source.write_text(json.dumps(config))
             server.list_result = {"tools": [{"name": CANARY + "." + server.session_id}]}
             with patch.dict(os.environ, {TOKEN_ENV: CANARY}):
                 result = await cli.execute(
-                    argparse.Namespace(config=str(source), action="discover", name="legacy.lookup")
+                    argparse.Namespace(config=str(source), action="discover", name="fixture")
                 )
             encoded = json.dumps(result)
             assert CANARY not in encoded and server.session_id not in encoded
             assert result["tools"] == ["[REDACTED CREDENTIAL].[REDACTED CREDENTIAL]"]
             assert server.calls[0][1]["Authorization"] == "Bearer " + CANARY
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("character", ["x", "\U0001f600", "\x01"])
-def test_legacy_fixed_argument_and_aggregate_limits_survive_migration(tmp_path, character):
-    (tmp_path / "MEMORY.md").write_text("public")
-
-    async def scenario():
-        async with FixtureServer() as server:
-            config = config_for(server.origin)
-            tool = config["capabilities"]["tools"]["lookup"]
-            # Control escapes count toward the original fixed JSON bound; keep that
-            # config valid while filling the dynamic fields to their independent cap.
-            tool["fixed_arguments"] = {"scope": ("x" if character == "\x01" else character) * 3000}
-            tool["parameters"] = {f"q{i}": "string" for i in range(16)}
-            config["capabilities"]["search"] = None
-            args = {f"q{i}": character * 2048 for i in range(16)}
-            for current in (config, migrated(config)):
-                caps = Capabilities(current, lambda _: None)
-                request = caps.authorize(
-                    "/mcp lookup " + json.dumps(args), Message(1, "", Channel()), C
-                )
-                assert "public answer" in await caps.execute(request, Privacy(tmp_path))
-            assert len([r for r, _ in server.calls if r["method"] == "tools/call"]) == 2
 
     asyncio.run(scenario())
 
@@ -385,30 +334,6 @@ def test_nested_deadlines_backpressure_cannot_lose_owned_process_tree(tmp_path):
     asyncio.run(scenario())
 
 
-def test_migration_keeps_exact_scalar_admission_boundaries(tmp_path):
-    config = config_for()
-    cases = [
-        ({"query": "string"}, {"query": "x" * 2048}, {"query": "x" * 2049}),
-        ({"count": "integer"}, {"count": 10**2047}, {"count": 10**2048}),
-        ({"count": "integer"}, {"count": -(10**2046)}, {"count": -(10**2047)}),
-    ]
-    for params, allowed, denied in cases:
-        config["capabilities"]["tools"]["lookup"]["parameters"] = params
-        config["capabilities"]["search"] = None
-        for current in (config, migrated(config)):
-            caps = Capabilities(current, lambda _: None)
-            assert caps.authorize(
-                "/mcp lookup " + json.dumps(allowed), Message(1, "", Channel()), C
-            )
-            with pytest.raises(CapabilityError, match="Invalid MCP arguments"):
-                caps.authorize("/mcp lookup " + json.dumps(denied), Message(2, "", Channel()), C)
-    # Sixteen integer parameters remain a small valid configuration after migration.
-    config["capabilities"]["tools"]["lookup"]["parameters"] = {
-        f"n{i}": "integer" for i in range(16)
-    }
-    Capabilities(migrated(config), lambda _: None)
-
-
 def test_connection_backed_http_initializes_and_calls_through_consumer(tmp_path):
     (tmp_path / "MEMORY.md").write_text("public synthetic context")
     (tmp_path / "public_context.md").write_text("public context")
@@ -417,8 +342,8 @@ def test_connection_backed_http_initializes_and_calls_through_consumer(tmp_path)
         async with FixtureServer() as server:
             server.legacy = True
             original = config_for(server.origin)
-            original["capabilities"]["tools"]["lookup"]["protocol"] = "2025-11-25"
-            config = migrated(original)
+            original["capabilities"]["connections"]["servers"]["fixture"]["protocol"] = "2025-11-25"
+            config = original
             prompts = []
 
             async def provider(prompt, work=False):
@@ -441,8 +366,8 @@ def test_connection_backed_http_initializes_and_calls_through_consumer(tmp_path)
                 "tools/list",
                 "tools/call",
             ]
-            assert bridge.capabilities.connections.status("legacy.lookup")["outcome"] == "completed"
-            assert not bridge.capabilities.connections.status("legacy.lookup")["connected"]
+            assert bridge.capabilities.connections.status("fixture")["outcome"] == "completed"
+            assert not bridge.capabilities.connections.status("fixture")["connected"]
 
     asyncio.run(scenario())
 
@@ -462,8 +387,14 @@ def test_failed_os_termination_retains_owner_for_real_retry(tmp_path):
                     await manager.disconnect("first")
             assert manager._active["first"] is client and client.process is process
             assert manager.status("first")["outcome"] == "cleanup_failed"
-            await manager.disconnect("first")
-            assert process.returncode is not None and manager._active == {}
+            with patch.object(target, attribute, side_effect=PermissionError("still denied")):
+                with pytest.raises(PermissionError):
+                    await manager.discover("first")
+            assert manager._active["first"] is client
+            assert not manager.status("first")["connected"]
+            assert (await manager.discover("first"))[0]["name"] == "read_example"
+            assert process.returncode is not None and not alive(process.pid)
+            assert manager._active == {} and manager.status("first")["outcome"] == "completed"
         finally:
             await manager.disconnect("first")
 

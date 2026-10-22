@@ -73,7 +73,7 @@ def discussion_reply(text):
 
 def load_config(root=ROOT):
     config = json.loads(config_path(root).read_text(encoding="utf-8"))
-    validate_runtime_config(config, NAMES)
+    config = validate_runtime_config(config, NAMES)
     Capabilities(
         config, print
     )  # Startup/preflight validates policy without dispatch or audit output.

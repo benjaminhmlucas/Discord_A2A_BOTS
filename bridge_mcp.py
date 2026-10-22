@@ -9,10 +9,10 @@ from typing import Any, cast
 import aiohttp
 
 from bridge_http import CapabilityError, SafeHTTP
-from bridge_mcp_schema import validate, JSON_ARGUMENT_BYTES
+from bridge_mcp_schema import validate
 
 PROTOCOL = "2026-07-28"
-LEGACY_PROTOCOL = "2025-11-25"
+PROTOCOL_2025 = "2025-11-25"
 META = {
     "io.modelcontextprotocol/protocolVersion": PROTOCOL,
     "io.modelcontextprotocol/clientInfo": {"name": "botbridge", "version": "1.0.0"},
@@ -48,7 +48,7 @@ class MCPClient:
         secrets: set[str] | None = None,
     ) -> None:
         self.http, self.destination, self.authorization = http, destination, authorization
-        if protocol not in (PROTOCOL, LEGACY_PROTOCOL):
+        if protocol not in (PROTOCOL, PROTOCOL_2025):
             raise CapabilityError("Unsupported MCP protocol")
         self.protocol = protocol
         self.session: str | None = None
@@ -72,7 +72,7 @@ class MCPClient:
         try:
             return await self.exchange(method, params, identity)
         except (asyncio.CancelledError, asyncio.TimeoutError):
-            if self.protocol == LEGACY_PROTOCOL and identity is not None and method != "initialize":
+            if self.protocol == PROTOCOL_2025 and identity is not None and method != "initialize":
                 self.cancelled_request = identity
             raise
 
@@ -136,7 +136,7 @@ class MCPClient:
         raise CapabilityError("Missing MCP response")
 
     async def connect(self) -> None:
-        if self.protocol == LEGACY_PROTOCOL:
+        if self.protocol == PROTOCOL_2025:
             result = await self.rpc(
                 "initialize",
                 {
@@ -149,15 +149,6 @@ class MCPClient:
             if result.get("protocolVersion") != self.protocol:
                 raise CapabilityError("MCP protocol mismatch")
             await self.rpc("notifications/initialized", {}, None)
-
-    async def call(
-        self, name: str, arguments: dict[str, Any], *, max_argument_bytes: int = JSON_ARGUMENT_BYTES
-    ) -> str:
-        try:
-            await self.connect()
-            return await self.tool_call(name, arguments, max_argument_bytes=max_argument_bytes)
-        finally:
-            await self.disconnect()
 
     async def disconnect(self) -> None:
         try:
@@ -205,9 +196,7 @@ class MCPClient:
                 raise CapabilityError("Invalid MCP discovery cursor")
         raise CapabilityError("MCP discovery limit reached")
 
-    async def tool_call(
-        self, name: str, arguments: dict[str, Any], *, max_argument_bytes: int = JSON_ARGUMENT_BYTES
-    ) -> str:
+    async def tool_call(self, name: str, arguments: dict[str, Any]) -> str:
         # Descriptions, annotations and server instructions cannot add tools or permissions.
         cursor, definition = None, None
         for _ in range(3):
@@ -241,7 +230,7 @@ class MCPClient:
         # Fail closed rather than sending arguments with incomplete protocol headers.
         if '"x-mcp-header"' in json.dumps(definition.get("inputSchema", {})):
             raise CapabilityError("MCP header schema unsupported")
-        validate(arguments, definition.get("inputSchema", {}), max_bytes=max_argument_bytes)
+        validate(arguments, definition.get("inputSchema", {}))
         result = await self.rpc(
             "tools/call", {"name": name, "arguments": arguments}, secrets.randbits(53)
         )

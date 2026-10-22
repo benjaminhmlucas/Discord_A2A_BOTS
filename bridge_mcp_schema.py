@@ -20,8 +20,6 @@ TYPES = {
     "null": type(None),
 }
 JSON_ARGUMENT_BYTES = 65536
-# 16*2048*6 escaped dynamic bytes + 4096*4 fixed UTF-8 bytes + keys/syntax < 256 KiB.
-LEGACY_ARGUMENT_BYTES = 262144
 KEYWORDS = {
     "type",
     "properties",
@@ -167,8 +165,8 @@ def checked_schema(schema: Any) -> None:
         raise CapabilityError("Invalid MCP input schema") from None
 
 
-def validate(value: Any, schema: Any, *, max_bytes: int = JSON_ARGUMENT_BYTES) -> None:
-    bounded(value, max_bytes=max_bytes)
+def validate(value: Any, schema: Any) -> None:
+    bounded(value)
     checked_schema(schema)
     if not matches(value, schema):
         raise CapabilityError("MCP arguments do not match schema")
