@@ -382,6 +382,104 @@ def test_nested_deadlines_backpressure_cannot_lose_owned_process_tree(tmp_path):
     asyncio.run(scenario())
 
 
+def test_migration_keeps_exact_scalar_admission_boundaries(tmp_path):
+    config = config_for()
+    cases = [
+        ({"query": "string"}, {"query": "x" * 2048}, {"query": "x" * 2049}),
+        ({"count": "integer"}, {"count": 10**2047}, {"count": 10**2048}),
+        ({"count": "integer"}, {"count": -(10**2046)}, {"count": -(10**2047)}),
+    ]
+    for params, allowed, denied in cases:
+        config["capabilities"]["tools"]["lookup"]["parameters"] = params
+        config["capabilities"]["search"] = None
+        for current in (config, migrated(config)):
+            caps = Capabilities(current, lambda _: None)
+            assert caps.authorize(
+                "/mcp lookup " + json.dumps(allowed), Message(1, "", Channel()), C
+            )
+            with pytest.raises(CapabilityError, match="Invalid MCP arguments"):
+                caps.authorize("/mcp lookup " + json.dumps(denied), Message(2, "", Channel()), C)
+    # Sixteen integer parameters remain a small valid configuration after migration.
+    config["capabilities"]["tools"]["lookup"]["parameters"] = {
+        f"n{i}": "integer" for i in range(16)
+    }
+    Capabilities(migrated(config), lambda _: None)
+
+
+def test_failed_os_termination_retains_owner_for_real_retry(tmp_path):
+    # Only the OS termination boundary is fault-injected; manager/transport run normally.
+    async def scenario():
+        manager = Capabilities(configured(tmp_path), lambda _: None).connections
+        client = await manager.connect("first", set())
+        process = client.process
+        try:
+            target, attribute = (process, "kill") if os.name == "nt" else (os, "killpg")
+            with patch.object(
+                target, attribute, side_effect=PermissionError("synthetic OS denial")
+            ):
+                with pytest.raises(PermissionError):
+                    await manager.disconnect("first")
+            assert manager._active["first"] is client and client.process is process
+            assert manager.status("first")["outcome"] == "cleanup_failed"
+            await manager.disconnect("first")
+            assert process.returncode is not None and manager._active == {}
+        finally:
+            await manager.disconnect("first")
+
+    asyncio.run(scenario())
+
+
+def test_platform_termination_contract_with_native_process(tmp_path):
+    import bridge_mcp_stdio as stdio
+
+    async def scenario():
+        manager = Capabilities(configured(tmp_path), lambda _: None).connections
+        client = await manager.connect("first", set())
+        process = client.process
+        # Exercise the other OS driver's argument contract; native lifecycle is tested separately.
+        if os.name == "nt":
+            calls = []
+
+            def group_kill(pid, sig):
+                calls.append((pid, sig))
+                process.kill()
+
+            with (
+                patch.object(stdio, "WINDOWS", False),
+                patch.object(os, "killpg", group_kill, create=True),
+                patch.object(stdio.signal, "SIGKILL", 9, create=True),
+            ):
+                await manager.disconnect("first")
+            assert calls == [(process.pid, 9)]
+        else:
+
+            def job_kill():
+                os.killpg(process.pid, stdio.signal.SIGKILL)
+
+            with patch.object(stdio, "WINDOWS", True), patch.object(process, "kill", job_kill):
+                await manager.disconnect("first")
+        assert process.returncode is not None and not manager._active
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_cleanup_task_keeps_ownership_until_retry(tmp_path):
+    async def scenario():
+        manager = Capabilities(configured(tmp_path), lambda _: None).connections
+        client = await manager.connect("first", set())
+        process = client.process
+        task = asyncio.create_task(manager.disconnect("first"))
+        await asyncio.sleep(0)
+        manager._closing["first"].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert manager._active["first"] is client
+        await manager.disconnect("first")
+        assert process.returncode is not None and not manager._active
+
+    asyncio.run(scenario())
+
+
 def test_dead_process_status_and_request_size_guard(tmp_path):
     async def scenario():
         manager = Capabilities(configured(tmp_path, "exit_after_init"), lambda _: None).connections

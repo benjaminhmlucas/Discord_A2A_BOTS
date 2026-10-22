@@ -91,7 +91,11 @@ global allowlist/enabled roster. The human command is still
 `<@BOT_ID> /mcp docs {"query":"topic"}`. The local input schema describes dynamic
 arguments; fixed top-level arguments must be disjoint. The merged arguments must
 also satisfy the server's declared input schema before `tools/call`.
-Search aliases use the exact query-only object schema shown above.
+Search aliases use the exact query-only object schema shown above, or the existing
+`parameters: {"query": "string"}` scalar form. Connection-backed aliases may use
+either `input_schema` or `parameters`, never both. The scalar form retains its
+original required-field, strict-type and 2048-character scalar admission rules,
+including the sign in an integer's decimal representation.
 
 Supported schema keywords are `type`, `properties`, `required`, boolean
 `additionalProperties`, `items`, `enum`, `anyOf`, `minLength`, `maxLength`,
@@ -102,7 +106,7 @@ an explicit subset, not a full JSON Schema implementation. References, patterns,
 formats, header-mirroring and unknown keywords are refused; nothing fetches remote
 schemas or executes schema text.
 
-Both local schema and remote schema checks are required. All arguments, including
+Both local argument policy and remote schema checks are required. All arguments, including
 nested raw strings and keys, pass current privacy/credential filtering before
 serialization or dispatch. Server descriptions/results cannot choose commands,
 endpoints, credentials or permissions. Existing read-only annotation vetoes remain;
@@ -117,6 +121,9 @@ provides `status`, `connect`, `disconnect`, request-scoped `session`, `discover`
 `call`. The runtime authorizes the explicit alias before calling this trusted
 transport API. A future #24 UI must use the same validators and manager, not
 implement another transport or permission engine.
+Raw discovery definitions returned by the trusted API remain untrusted data;
+callers must filter credentials before displaying them. The CLI propagates selected
+credential/session values to its redactor and sanitizes names before serialization.
 
 Use this checkout's Python interpreter; Windows examples:
 
@@ -141,14 +148,16 @@ Edits/migration validate the complete resulting bridge configuration and write
 only a **new** export, refusing to overwrite existing files. Review it and deploy
 through the normal stopped-service/update/restart procedure; no hot reload or
 live service action occurs. Retain the original ignored configuration for rollback.
-Migration converts legacy HTTP aliases into separate connection references and
-equivalent dynamic schemas, preserving scopes/fixed arguments and disabled state.
+Migration converts legacy HTTP aliases into separate connection references while
+retaining the exact scalar `parameters` policy, scopes, fixed arguments and disabled
+state. It does not translate scalar limits into looser nested-schema permissions.
 Removing a referenced connection is rejected until its aliases are changed/removed.
 No migration is required to continue using the original HTTP alias format.
 
 ## Bounds and lifecycle
 
-There are at most 32 profiles, 32 arguments/environment entries, 1024 characters per
+There are at most 32 profiles, 32 launch arguments and 32 entries in each environment
+map, 1024 characters per
 executable/working-directory path and 2048 characters per launch argument/value.
 Each profile is at most 16 KiB. Argument graphs are at most six levels, 32 object
 members/array items per container, 256 privacy leaves and 64 KiB encoded JSON; scalar

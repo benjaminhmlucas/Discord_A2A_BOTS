@@ -117,15 +117,9 @@ def migrated(config: dict[str, Any]) -> dict[str, Any]:
             "transport": "http",
             **{k: tool[k] for k in ("endpoint", "protocol", "credential_env")},
         }
-        parameters = tool["parameters"]
         tool["connection"] = name
-        tool["input_schema"] = {
-            "type": "object",
-            "properties": {k: {"type": v} for k, v in parameters.items()},
-            "required": list(parameters),
-            "additionalProperties": False,
-        }
-        for key in ("endpoint", "protocol", "credential_env", "parameters"):
+        # Preserve the exact legacy scalar policy, including integer string-length limits.
+        for key in ("endpoint", "protocol", "credential_env"):
             del tool[key]
     return result
 

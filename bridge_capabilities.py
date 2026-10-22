@@ -93,27 +93,7 @@ class Capabilities:
                     and bool(tool[key])
                     and all(type(i) is int and i in roster for i in tool[key])
                 )
-            require(isinstance(tool["parameters"], dict) and len(tool["parameters"]) <= 16)
-            for name, kind in tool["parameters"].items():
-                require(
-                    isinstance(name, str)
-                    and NAME.fullmatch(name)
-                    and isinstance(kind, str)
-                    and kind in KINDS
-                )
-            fixed = tool["fixed_arguments"]
-            require(
-                isinstance(fixed, dict)
-                and len(fixed) <= 16
-                and not set(fixed) & set(tool["parameters"])
-            )
-            require(
-                all(
-                    isinstance(k, str) and NAME.fullmatch(k) and type(v) in KINDS.values()
-                    for k, v in fixed.items()
-                )
-            )
-            require(len(json.dumps(fixed, ensure_ascii=False)) <= 4096)
+            self.validate_scalar_tool(tool)
             env = tool["credential_env"]
             require(env is None or (isinstance(env, str) and ENV_NAME.fullmatch(env)))
         self.search = data.get("search")
@@ -139,6 +119,7 @@ class Capabilities:
         self.refresh_secrets()
 
     def validate_connected_tool(self, tool: dict[str, Any]) -> None:
+        dynamic = "parameters" if "parameters" in tool else "input_schema"
         require(
             set(tool)
             == {
@@ -147,7 +128,7 @@ class Capabilities:
                 "read_only",
                 "user_ids",
                 "bot_ids",
-                "input_schema",
+                dynamic,
                 "fixed_arguments",
             }
         )
@@ -161,12 +142,49 @@ class Capabilities:
                 and bool(tool[key])
                 and all(type(i) is int and i in roster for i in tool[key])
             )
-        schema = tool["input_schema"]
+        if dynamic == "parameters":
+            self.validate_scalar_tool(tool)
+            return
+        schema = tool[dynamic]
         checked_schema(schema)
         require(schema.get("type") == "object" and schema.get("additionalProperties") is False)
         fixed = tool["fixed_arguments"]
         require(isinstance(fixed, dict) and not set(fixed) & set(schema.get("properties", {})))
         bounded(fixed)
+
+    def validate_scalar_tool(self, tool: dict[str, Any]) -> None:
+        require(isinstance(tool["parameters"], dict) and len(tool["parameters"]) <= 16)
+        for name, kind in tool["parameters"].items():
+            require(
+                isinstance(name, str)
+                and NAME.fullmatch(name)
+                and isinstance(kind, str)
+                and kind in KINDS
+            )
+        fixed = tool["fixed_arguments"]
+        require(
+            isinstance(fixed, dict)
+            and len(fixed) <= 16
+            and not set(fixed) & set(tool["parameters"])
+        )
+        require(
+            all(
+                isinstance(k, str) and NAME.fullmatch(k) and type(v) in KINDS.values()
+                for k, v in fixed.items()
+            )
+        )
+        require(len(json.dumps(fixed, ensure_ascii=False)) <= 4096)
+
+    def validate_arguments(self, tool: dict[str, Any], values: Any) -> None:
+        if "input_schema" in tool:
+            validate(values, tool["input_schema"])
+            return
+        if not isinstance(values, dict) or set(values) != set(tool["parameters"]):
+            raise CapabilityError("Invalid MCP arguments")
+        for name, kind in tool["parameters"].items():
+            value = values[name]
+            if type(value) is not KINDS[kind] or len(str(value)) > 2048:
+                raise CapabilityError("Invalid MCP arguments")
 
     def refresh_secrets(self) -> None:
         self.secrets.clear()
@@ -241,17 +259,7 @@ class Capabilities:
             tool = self.tools[request.name]
             if message.author.id not in tool["user_ids"] or bot_id not in tool["bot_ids"]:
                 raise CapabilityError("Tool access denied")
-            values = request.arguments
-            if "connection" in tool:
-                validate(values, tool["input_schema"])
-                self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
-                return request
-            if not isinstance(values, dict) or set(values) != set(tool["parameters"]):
-                raise CapabilityError("Invalid MCP arguments")
-            for name, kind in tool["parameters"].items():
-                value = values[name]
-                if type(value) is not KINDS[kind] or len(str(value)) > 2048:
-                    raise CapabilityError("Invalid MCP arguments")
+            self.validate_arguments(tool, request.arguments)
         self.log(f"Capability {request.name} authorization=allowed outcome=admitted")
         return request
 
@@ -285,7 +293,7 @@ class Capabilities:
                     tool = self.tools[request.name]
                     if "connection" in tool:
                         # Revalidate the request snapshot before transport dispatch.
-                        validate(request.arguments, tool["input_schema"])
+                        self.validate_arguments(tool, request.arguments)
                         text = await self.connections.call(
                             tool["connection"], tool["name"], values, self.active_secrets
                         )

@@ -74,7 +74,15 @@ def main(argv=None):
     try:
         print(json.dumps(asyncio.run(execute(args))))
         return 0
-    except (ValueError, KeyError, TypeError, OSError, aiohttp.ClientError, asyncio.TimeoutError):
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        RecursionError,
+        OSError,
+        aiohttp.ClientError,
+        asyncio.TimeoutError,
+    ):
         print(
             "MCP configuration or connection failed; check profile, credentials and server availability.",
             file=sys.stderr,

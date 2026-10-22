@@ -218,3 +218,21 @@ def test_cli_export_uses_runtime_validation_before_creating_output(tmp_path, cap
     assert cli.main(["--config", str(source), "migrate", "--output", str(output)]) == 1
     assert not output.exists() and source.read_bytes() == original
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_cli_deep_json_config_and_profile_have_static_errors(tmp_path, capsys):
+    source, deep, output = (
+        tmp_path / "source.json",
+        tmp_path / "deep.json",
+        tmp_path / "export.json",
+    )
+    source.write_text(json.dumps(configured(tmp_path)))
+    deep.write_text("[" * 2000 + "0" + "]" * 2000)
+    assert cli.main(["--config", str(deep), "status"]) == 1
+    assert (
+        cli.main(
+            ["--config", str(source), "add", "new", "--profile", str(deep), "--output", str(output)]
+        )
+        == 1
+    )
+    assert not output.exists() and "Traceback" not in capsys.readouterr().err
