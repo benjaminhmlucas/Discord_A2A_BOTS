@@ -431,28 +431,13 @@ def test_actual_workflow_links_are_rejected(candidate, level):
         return
     linked.rename(target)
     if os.name == "nt":
+        # A real NTFS junction (reparse point) without symlink privilege. Created via the
+        # same API CPython's own tests use, instead of a Windows PowerShell cold start,
+        # which took ~10 seconds on hosted runners and timed out.
+        import _winapi
 
-        def quote(value):
-            return "'" + str(value).replace("'", "''") + "'"
-
-        subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "New-Item -ItemType Junction -Path "
-                + quote(linked)
-                + " -Target "
-                + quote(target)
-                + " | Out-Null",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        _winapi.CreateJunction(str(target), str(linked))
+        assert os.lstat(linked).st_file_attributes & 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
     else:
         linked.symlink_to(target, target_is_directory=target.is_dir())
     with pytest.raises(gate.PolicyError, match="linked_workflow_path"):

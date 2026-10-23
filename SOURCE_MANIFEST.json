@@ -93,7 +93,7 @@
     "tests/test_bridge.py": "e623b122911ec38c6ea1d260f34f8732d829ebd6d185b36145d59fd8e668a793",
     "tests/test_capabilities.py": "d3e0969a7aa20d681c84a4a6e9455cfcad888a69d88b807c565f9519eaf2c162",
     "tests/test_capability_http.py": "5fd376f46390de811c0561e11c53daac900d1b46a49c1f87f86e9c8d34f9821a",
-    "tests/test_ci_injection.py": "332c4ec63adcdfff919eb4214601262a5c1e107686347fa117ae4f27101974bd",
+    "tests/test_ci_injection.py": "d96998ca22021a3de7e23a16ffd97b71ea1b2f312e017cb73ea35e221450f713",
     "tests/test_ci_policy.py": "f7add8007d1a5e6fd9a44336be74b031d49b7454982724e51d11c2115715d409",
     "tests/test_connection_config.py": "8aa8e307a2bfc8f08e347e629959644a96d05076cf2c88ae937c15252fa93fe3",
     "tests/test_connections.py": "5980fddd45b77fcccb7a87c84f215142ce1b05565cf37491f34984a6e8f8701b",
