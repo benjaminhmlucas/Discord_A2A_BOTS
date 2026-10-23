@@ -16,7 +16,7 @@ from botbridge_common import (
     ANTIGRAVITY_APP_ID,
     CLAUDE_BOT_APP_ID,
 )
-from bridge_settings import config_path
+from bridge_settings import config_path, validate_runtime_config
 from bridge_privacy import Privacy
 from bridge_contracts import Provider, ProviderError
 from bridge_health_io import write_health
@@ -73,46 +73,7 @@ def discussion_reply(text):
 
 def load_config(root=ROOT):
     config = json.loads(config_path(root).read_text(encoding="utf-8"))
-    for key, default in {
-        "user_requests_per_minute": 6,
-        "bot_requests_per_minute": 30,
-        "bot_requests_per_day": 200,
-    }.items():
-        config.setdefault(key, default)
-        if type(config[key]) is not int or not 1 <= config[key] <= 10000:
-            raise ValueError(f"Invalid request limit: {key}")
-    if type(config.get("allow_work", False)) is not bool:
-        raise ValueError("allow_work must be a Boolean")
-    roles = config["bot_ids"]
-    if {roles["codex"], roles["antigravity"], roles["claude"]} != set(NAMES):
-        raise ValueError(
-            "Bot identities differ from the launch configuration; restart after changes"
-        )
-    if not isinstance(config["owner_id"], int) or config["owner_id"] <= 0:
-        raise ValueError("Configure a numeric owner ID")
-    if not isinstance(config["channel_id"], int) or config["channel_id"] <= 0:
-        raise ValueError("Configure a numeric channel ID")
-    if not config.get("allowed_user_ids") or any(
-        not isinstance(i, int) or i <= 0 for i in config["allowed_user_ids"]
-    ):
-        raise ValueError("Configure a nonempty trusted-user allowlist")
-    ids = config["enabled_bots"]
-    if len(ids) != len(set(ids)) or not ids or any(i not in NAMES for i in ids):
-        raise ValueError("Invalid enabled roster")
-    for key in (
-        "queue_capacity",
-        "queue_wait_seconds",
-        "request_seconds",
-        "total_request_seconds",
-        "send_seconds",
-        "handoff_seconds",
-        "history_messages",
-        "history_chars",
-    ):
-        if not isinstance(config[key], int) or config[key] <= 0:
-            raise ValueError(f"Invalid setting: {key}")
-    if not 1 <= config["max_turns"] <= 15:
-        raise ValueError("Invalid maximum turns")
+    config = validate_runtime_config(config, NAMES)
     Capabilities(
         config, print
     )  # Startup/preflight validates policy without dispatch or audit output.

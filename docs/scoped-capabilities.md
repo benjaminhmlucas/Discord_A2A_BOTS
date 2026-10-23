@@ -21,8 +21,9 @@ Use a numeric bot mention in the configured channel, followed by one command:
 `/web` fetches one page with GET. It does not execute scripts, load linked resources,
 use browser sessions or log into sites. `/search` calls the configured MCP search alias
 with a `query` string. `/mcp` selects a configured alias, never an arbitrary endpoint or
-tool name. Tool parameters are required scalar strings, integers or booleans; nested
-objects and arrays are unsupported. Fixed arguments cannot be overridden. A command
+tool name. Every MCP alias references a connection and declares bounded scalar or
+nested object/array arguments through an explicit
+[input schemas](mcp-connections.md). Fixed arguments cannot be overridden. A command
 inside `/discuss`, `/work`, a quote or a tool result does not invoke this dispatcher.
 Discussion continuations cannot invoke capabilities. A bot reply beginning with one
 of these commands remains ordinary discussion text, including with capabilities disabled.
@@ -40,17 +41,31 @@ verified for your read-only server before considering enablement:
   "enabled": false,
   "web": false,
   "internal_origins": [],
+  "connections": {
+    "version": 1,
+    "servers": {
+      "docs-server": {
+        "transport": "http",
+        "endpoint": "https://mcp.example.com/mcp",
+        "protocol": "2025-11-25",
+        "credential_env": "BOTBRIDGE_MCP_DOCS"
+      }
+    }
+  },
   "tools": {
     "docs": {
-      "endpoint": "https://mcp.example.com/mcp",
-      "protocol": "2025-11-25",
+      "connection": "docs-server",
       "name": "search_docs",
       "read_only": true,
       "user_ids": [123456789],
       "bot_ids": [987654321],
-      "parameters": {"query": "string"},
-      "fixed_arguments": {"collection": "public"},
-      "credential_env": "BOTBRIDGE_MCP_DOCS"
+      "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "fixed_arguments": {"collection": "public"}
     }
   },
   "search": "docs"
@@ -58,9 +73,10 @@ verified for your read-only server before considering enablement:
 ```
 
 User and bot IDs must also appear in the bridge's global allowlist and enabled roster.
-Every tool needs its own explicit user/bot scope. At most 32 aliases and 16 dynamic
-plus 16 fixed scalar arguments per tool are allowed; dynamic values are at most 2048
-characters. Search aliases must have exactly one dynamic parameter, `query: string`.
+Every tool needs its own explicit user/bot scope. At most 32 aliases are allowed;
+argument graphs share the [schema and size limits](mcp-connections.md).
+Search aliases require the exact query-only input schema shown above.
+The unreleased inline HTTP/`parameters` format is replaced, with no migration path.
 `credential_env: null` selects an unauthenticated server. Credential names must start
 with `BOTBRIDGE_MCP_` and use uppercase ASCII; existing Discord/provider credentials
 cannot be selected. Set the value in the bot process environment without committing it
@@ -118,18 +134,20 @@ only for the active bridge request. The client does not import server instructio
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text
 results and schemas requiring `x-mcp-header` mirroring fail closed. There are no
 subscriptions, reconnections or persisted sessions. Other protocol revisions, legacy
-HTTP+SSE transports, stdio and OAuth discovery are unsupported; use a compatible server
+HTTP+SSE transports and OAuth discovery are unsupported. Local stdio 2025-11-25 is
+available through [registered connection profiles](mcp-connections.md); use a compatible server
 rather than relaxing the checks. See the [stateless transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 and [2025 Streamable HTTP specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 | Provider identity | Dispatch | Native tools/inherited MCP |
 | --- | --- | --- |
-| CodexBot | Bridge HTTP -> sanitized result -> existing Codex text call | Disabled in public mode |
-| ClaudeBot | Bridge HTTP -> sanitized result -> existing Claude text call | Disabled in public mode |
-| AntigravityBot | Bridge HTTP -> sanitized result -> existing Gemini text call | No native tools configured |
+| CodexBot | Bridge HTTP/stdio -> sanitized result -> existing Codex text call | Disabled in public mode |
+| ClaudeBot | Bridge HTTP/stdio -> sanitized result -> existing Claude text call | Disabled in public mode |
+| AntigravityBot | Bridge HTTP/stdio -> sanitized result -> existing Gemini text call | No native tools configured |
 
-The optional dispatcher launches no subprocesses. Existing hidden Windows defaults
-and `BOTBRIDGE_SHOW_CONSOLE=1` troubleshooting behavior are unchanged. Codex's own
+HTTP/web commands launch no subprocesses; registered stdio profiles launch an
+explicit operator-selected server under the [owned process host](mcp-connections.md).
+Hidden Windows defaults and `BOTBRIDGE_SHOW_CONSOLE=1` remain available. Codex's own
 [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) is intentionally
 not used as a bridge capability registry.
 
@@ -140,18 +158,21 @@ daily allowance, queue capacity and per-bot execution lock. Daily capacity is ch
 when a capability attempt starts, before any network activity; its subsequent provider
 reply uses that same reservation. Capability failure/cancellation after that point stays
 charged. Cancellation or expiry while still queued gives the daily reservation back.
-Each operation has a 15-second total network deadline, a 64 KiB body limit per response,
+HTTP operations have a 15-second total network deadline, a 64 KiB body limit per response,
 three web redirects or three MCP discovery pages, and at most one MCP tool call.
-Legacy initialization/notification, cancellation signalling and session termination add
+2025-11-25 initialization/notification, cancellation signalling and session termination add
 protocol-only requests; cancellation and termination share at most two additional seconds,
 and cleanup does not mask a call failure. Bodies
 with compression are refused. Tool text supplied to providers is capped at 16000
-characters. Network I/O is asynchronous; privacy scans run off the event loop.
+characters. Stdio uses the separate framing/stderr bounds and owned lifecycle in
+[MCP connections](mcp-connections.md). Network I/O is asynchronous; privacy scans
+run off the event loop.
 
 Actual argument values are privacy-checked before JSON escaping or network dispatch.
 Tool output is checked against current private-memory rules and known scoped
 credentials before being supplied to a provider; public replies are checked again.
-Credentials go only in the selected server's Authorization header. Audit entries record
+HTTP credentials go only in the selected server's Authorization header; stdio credentials
+go only to explicitly configured child environment names. Audit entries record
 the configured alias (or generic command), authorization decision and outcome; they
 contain no queries, URLs, arguments, result bodies or exception messages. Literal
 redaction is not semantic DLP against a server that encodes or paraphrases a secret;

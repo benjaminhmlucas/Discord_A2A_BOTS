@@ -12,7 +12,7 @@ from aiohttp import web
 
 from bridge_capabilities import Capabilities
 from bridge_http import CapabilityError
-from bridge_mcp import MCPClient, LEGACY_PROTOCOL, response_result
+from bridge_mcp import MCPClient, PROTOCOL_2025, response_result
 from bridge_privacy import Privacy
 from test_bridge import Author, Bridge, Channel, Client, Message
 
@@ -29,22 +29,44 @@ def config_for(origin="https://fixture.example", credential=None):
         "enabled": True,
         "web": True,
         "internal_origins": [origin] if origin.startswith("http:") else [],
+        "connections": {
+            "version": 1,
+            "servers": {
+                "fixture": {
+                    "transport": "http",
+                    "endpoint": origin + "/mcp",
+                    "protocol": "2026-07-28",
+                    "credential_env": credential,
+                }
+            },
+        },
         "tools": {
             "lookup": {
-                "endpoint": origin + "/mcp",
-                "protocol": "2026-07-28",
+                "connection": "fixture",
                 "name": "read_example",
                 "read_only": True,
                 "user_ids": [OWNER],
                 "bot_ids": [C, A],
-                "parameters": {"query": "string"},
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
                 "fixed_arguments": {"scope": "public"},
-                "credential_env": credential,
             }
         },
         "search": "lookup",
     }
     return config
+
+
+async def call_client(client, name, arguments):
+    try:
+        await client.connect()
+        return await client.tool_call(name, arguments)
+    finally:
+        await client.disconnect()
 
 
 def test_config_validation_and_default_off():
@@ -85,21 +107,9 @@ def test_config_validation_and_default_off():
         "read_only": [False, 1],
         "user_ids": [1, [], [999], [True]],
         "bot_ids": [1, [], [999], [True]],
-        "parameters": [
-            [],
-            {"bad name": "string"},
-            {"query": 1},
-            {"query": "float"},
-            {str(i): "string" for i in range(17)},
-        ],
-        "fixed_arguments": [
-            [],
-            {"query": "conflicting"},
-            {"bad name": "value"},
-            {"scope": []},
-            {"scope": "x" * 4097},
-            {str(i): "x" for i in range(17)},
-        ],
+        "parameters": [{"query": "string"}],
+        "input_schema": [[], {"type": "array"}, {"type": "object"}],
+        "fixed_arguments": [[], {"query": "conflicting"}, {"scope": "x" * 4097}],
         "credential_env": [1, "GEMINI_API_KEY", "BOTBRIDGE_MCP_bad"],
     }.items():
         for value in values:
@@ -136,7 +146,7 @@ def test_transport_authorization_and_argument_permissions():
         "/mcp lookup []",
         '/mcp lookup {"extra":"x"}',
         '/mcp lookup {"query":1}',
-        '/mcp lookup {"query":"' + "x" * 2049 + '"}',
+        '/mcp lookup {"query":"' + "x" * 4097 + '"}',
         "/mcp lookup " + "[" * 2000,
         "/web https://127.0.0.1",
     ):
@@ -324,7 +334,9 @@ def test_server_annotations_only_veto_operator_approved_calls(tmp_path, legacy):
             server.legacy = legacy
             config = config_for(server.origin)
             if legacy:
-                config["capabilities"]["tools"]["lookup"]["protocol"] = LEGACY_PROTOCOL
+                config["capabilities"]["connections"]["servers"]["fixture"]["protocol"] = (
+                    PROTOCOL_2025
+                )
             logs = []
             caps = Capabilities(config, logs.append)
             request = caps.authorize("/search topic", Message(1, "", Channel()), C)
@@ -385,7 +397,9 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
             client = MCPClient(caps.http, server.origin + "/mcp", CANARY)
             for mode in ("json", "sse", "slow", "duplicate"):
                 server.mode = mode
-                assert await client.call("read_example", {"query": "topic"}) == "public answer"
+                assert (
+                    await call_client(client, "read_example", {"query": "topic"}) == "public answer"
+                )
             assert all(h["Authorization"] == "Bearer " + CANARY for _, h in server.calls)
             for mode in (
                 "error",
@@ -399,7 +413,7 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
             ):
                 server.mode = mode
                 with pytest.raises(CapabilityError) as error:
-                    await client.call("read_example", {})
+                    await call_client(client, "read_example", {})
                 assert CANARY not in str(error.value)
             server.mode = "json"
             for result in (
@@ -408,7 +422,7 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
                 {"tools": [1]},
                 {"tools": [{"name": "read_example"}, {"name": "read_example"}]},
                 {"tools": []},
-                {"tools": [], "nextCursor": "x" * 2049},
+                {"tools": [], "nextCursor": "x" * 4097},
                 {"tools": [], "nextCursor": "next"},
                 {
                     "tools": [
@@ -421,7 +435,7 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
             ):
                 server.list_result = result
                 with pytest.raises(CapabilityError):
-                    await client.call("read_example", {})
+                    await call_client(client, "read_example", {})
             server.list_result = None
             for result in (
                 {"isError": True},
@@ -434,7 +448,7 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
             ):
                 server.result = result
                 with pytest.raises(CapabilityError):
-                    await client.call("read_example", {})
+                    await call_client(client, "read_example", {})
             server.result = {"content": [{"type": "text", "text": CANARY}]}
             request = caps.authorize('/mcp lookup {"query":"topic"}', Message(1, "", Channel()), C)
             with patch.dict(os.environ, {TOKEN_ENV: CANARY}):
@@ -455,12 +469,19 @@ def test_real_registry_errors_cancellation_and_typed_parameters(tmp_path):
             caps = Capabilities(config_for(server.origin), logs.append)
             request = caps.authorize('/mcp lookup {"query":"topic"}', message, C)
             assert "public answer" in await caps.execute(request, privacy)
-            caps.tools["lookup"]["parameters"] = {"count": "integer", "enabled": "boolean"}
+            caps.tools["lookup"]["input_schema"] = {
+                "type": "object",
+                "properties": {"count": {"type": "integer"}, "enabled": {"type": "boolean"}},
+                "required": ["count", "enabled"],
+                "additionalProperties": False,
+            }
             assert caps.authorize('/mcp lookup {"count":1,"enabled":false}', message, C)
             with pytest.raises(CapabilityError):
                 caps.authorize('/mcp lookup {"count":true,"enabled":1}', message, C)
-            caps.tools["lookup"]["parameters"] = {"query": "string"}
-            caps.tools["lookup"]["credential_env"] = TOKEN_ENV
+            caps.tools["lookup"]["input_schema"] = config_for()["capabilities"]["tools"]["lookup"][
+                "input_schema"
+            ]
+            caps.registry._data["servers"]["fixture"]["credential_env"] = TOKEN_ENV
             with (
                 patch.dict(os.environ, {TOKEN_ENV: ""}),
                 pytest.raises(CapabilityError, match="unavailable"),
@@ -471,7 +492,7 @@ def test_real_registry_errors_cancellation_and_typed_parameters(tmp_path):
                 pytest.raises(CapabilityError, match="Invalid MCP credential"),
             ):
                 await caps.execute(request, privacy)
-            caps.tools["lookup"]["credential_env"] = None
+            caps.registry._data["servers"]["fixture"]["credential_env"] = None
             server.mode = "slow"
             caps.http.seconds = 0.02
             with pytest.raises(CapabilityError, match="network"):
@@ -484,7 +505,7 @@ def test_real_registry_errors_cancellation_and_typed_parameters(tmp_path):
             with pytest.raises(asyncio.CancelledError):
                 await task
             assert logs[-1] == "Capability lookup authorization=allowed outcome=cancelled"
-            caps.tools["lookup"]["endpoint"] = "http://127.0.0.1:1/mcp"
+            caps.registry._data["servers"]["fixture"]["endpoint"] = "http://127.0.0.1:1/mcp"
             caps.http.internal_origins += ("http://127.0.0.1:1",)
             with pytest.raises(CapabilityError, match="network"):
                 await caps.execute(request, privacy)
@@ -520,8 +541,8 @@ def test_real_legacy_initialization_session_cleanup_and_refusals(tmp_path):
             caps = Capabilities(config_for(server.origin), lambda _: None)
             with pytest.raises(CapabilityError, match="Unsupported MCP protocol"):
                 MCPClient(caps.http, server.origin + "/mcp", protocol="unknown")
-            client = MCPClient(caps.http, server.origin + "/mcp", protocol=LEGACY_PROTOCOL)
-            assert await client.call("read_example", {}) == "public answer"
+            client = MCPClient(caps.http, server.origin + "/mcp", protocol=PROTOCOL_2025)
+            assert await call_client(client, "read_example", {}) == "public answer"
             assert client.session is None
             assert server.deletes[-1]["Mcp-Session-Id"] == "synthetic-session-identifier"
             assert [body["method"] for body, _ in server.calls] == [
@@ -532,25 +553,25 @@ def test_real_legacy_initialization_session_cleanup_and_refusals(tmp_path):
             ]
             server.session_id = None
             before = len(server.deletes)
-            assert await client.call("read_example", {}) == "public answer"
+            assert await call_client(client, "read_example", {}) == "public answer"
             assert len(server.deletes) == before
             server.session_id = "bad session identifier"
             with pytest.raises(CapabilityError, match="Invalid MCP session"):
-                await client.call("read_example", {})
+                await call_client(client, "read_example", {})
             server.session_id = "x" * 257
             with pytest.raises(CapabilityError, match="Invalid MCP session"):
-                await client.call("read_example", {})
+                await call_client(client, "read_example", {})
             server.session_id = "synthetic-session-identifier"
             server.negotiated_protocol = "2024-11-05"
             with pytest.raises(CapabilityError, match="protocol mismatch"):
-                await client.call("read_example", {})
+                await call_client(client, "read_example", {})
             assert server.deletes[-1]["Mcp-Session-Id"] == server.session_id
             server.negotiated_protocol = "2025-11-25"
             server.notification_status = 500
             with pytest.raises(CapabilityError, match="notification failed"):
-                await client.call("read_example", {})
+                await call_client(client, "read_example", {})
             server.notification_status = 202
-            caps.tools["lookup"]["protocol"] = LEGACY_PROTOCOL
+            caps.registry._data["servers"]["fixture"]["protocol"] = PROTOCOL_2025
             server.result = {"content": [{"type": "text", "text": server.session_id}]}
             request = caps.authorize('/mcp lookup {"query":"topic"}', Message(1, "", Channel()), C)
             result = await caps.execute(request, Privacy(tmp_path))
@@ -676,7 +697,9 @@ def test_actual_discord_commands_injection_and_scoped_credentials(tmp_path, lega
             config = config_for(server.origin, TOKEN_ENV)
             server.legacy = legacy
             if legacy:
-                config["capabilities"]["tools"]["lookup"]["protocol"] = LEGACY_PROTOCOL
+                config["capabilities"]["connections"]["servers"]["fixture"]["protocol"] = (
+                    PROTOCOL_2025
+                )
             expected_calls = 8 if legacy else 4
             logs, prompts = [], []
             session_echo = ""
