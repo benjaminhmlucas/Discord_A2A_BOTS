@@ -75,7 +75,7 @@ def load_config(root=ROOT):
     config = json.loads(config_path(root).read_text(encoding="utf-8"))
     config = validate_runtime_config(config, NAMES)
     Capabilities(
-        config, print
+        config, print, Path(root)
     )  # Startup/preflight validates policy without dispatch or audit output.
     return config
 
@@ -103,7 +103,7 @@ class Bridge:
             else state
         )
         self.privacy = Privacy(memory_dir) if privacy is None else privacy
-        self.capabilities = Capabilities(self.config, self.log)
+        self.capabilities = Capabilities(self.config, self.log, self.root)
         self.lock, self.pending = asyncio.Lock(), 0
         self.health = {
             "bot_id": bot_id,

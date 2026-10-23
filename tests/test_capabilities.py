@@ -22,6 +22,13 @@ TOKEN_ENV = "BOTBRIDGE_MCP_FIXTURE"
 CANARY = "synthetic-scoped-credential-unique-value"
 
 
+def environment_auth(name):
+    """An explicit environment reference, or no authentication when name is None."""
+    if name is None:
+        return {"type": "none"}
+    return {"type": "bearer", "credential": {"source": "environment", "name": name}}
+
+
 def config_for(origin="https://fixture.example", credential=None):
     config = json.loads(FIXTURE.read_text())
     config["allowed_user_ids"] = [OWNER, 202]
@@ -36,7 +43,7 @@ def config_for(origin="https://fixture.example", credential=None):
                     "transport": "http",
                     "endpoint": origin + "/mcp",
                     "protocol": "2026-07-28",
-                    "credential_env": credential,
+                    "authentication": environment_auth(credential),
                 }
             },
         },
@@ -394,7 +401,9 @@ def test_real_mcp_modes_discovery_and_failures(tmp_path):
         privacy = Privacy(tmp_path)
         async with FixtureServer() as server:
             caps = Capabilities(config_for(server.origin, TOKEN_ENV), lambda _: None)
-            client = MCPClient(caps.http, server.origin + "/mcp", CANARY)
+            client = MCPClient(
+                caps.http, server.origin + "/mcp", {"Authorization": "Bearer " + CANARY}
+            )
             for mode in ("json", "sse", "slow", "duplicate"):
                 server.mode = mode
                 assert (
@@ -481,10 +490,15 @@ def test_real_registry_errors_cancellation_and_typed_parameters(tmp_path):
             caps.tools["lookup"]["input_schema"] = config_for()["capabilities"]["tools"]["lookup"][
                 "input_schema"
             ]
-            caps.registry._data["servers"]["fixture"]["credential_env"] = TOKEN_ENV
+            caps.registry._data["servers"]["fixture"]["authentication"] = environment_auth(
+                TOKEN_ENV
+            )
+            with patch.dict(os.environ), pytest.raises(CapabilityError, match="unavailable"):
+                os.environ.pop(TOKEN_ENV, None)
+                await caps.execute(request, privacy)
             with (
                 patch.dict(os.environ, {TOKEN_ENV: ""}),
-                pytest.raises(CapabilityError, match="unavailable"),
+                pytest.raises(CapabilityError, match="empty"),
             ):
                 await caps.execute(request, privacy)
             with (
@@ -492,7 +506,7 @@ def test_real_registry_errors_cancellation_and_typed_parameters(tmp_path):
                 pytest.raises(CapabilityError, match="Invalid MCP credential"),
             ):
                 await caps.execute(request, privacy)
-            caps.registry._data["servers"]["fixture"]["credential_env"] = None
+            caps.registry._data["servers"]["fixture"]["authentication"] = environment_auth(None)
             server.mode = "slow"
             caps.http.seconds = 0.02
             with pytest.raises(CapabilityError, match="network"):

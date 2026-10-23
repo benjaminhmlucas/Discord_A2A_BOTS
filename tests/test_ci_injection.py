@@ -603,3 +603,38 @@ def test_every_unlisted_step_setting_is_rejected(candidate, key):
     save(candidate, data)
     with pytest.raises(gate.PolicyError, match="^unapproved_step_key$"):
         gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize(
+    "fault,code",
+    [
+        ("macos_elsewhere", "untrusted_runner"),
+        ("macos_self_hosted", "untrusted_runner"),
+        ("linux_runner", "untrusted_runner"),
+        ("credential_matrix", "untrusted_job_matrix"),
+        ("missing_linux", "unexpected_ci_jobs"),
+        ("missing_macos", "unexpected_ci_jobs"),
+        ("credential_secret", "expression_in_execution"),
+        ("credential_condition", "step_execution"),
+    ],
+)
+def test_native_credential_jobs_cannot_be_widened(candidate, fault, code):
+    data = load(candidate)
+    jobs = data["jobs"]
+    if fault == "macos_elsewhere":
+        jobs["quality"]["runs-on"] = "macos-15"
+    elif fault == "macos_self_hosted":
+        jobs["credentials-macos"]["runs-on"] = "self-hosted"
+    elif fault == "linux_runner":
+        jobs["credentials-linux"]["runs-on"] = "macos-15"
+    elif fault == "credential_matrix":
+        jobs["credentials-linux"]["strategy"] = {"fail-fast": False, "matrix": {"os": ["x"]}}
+    elif fault in ("missing_linux", "missing_macos"):
+        jobs.pop("credentials-" + fault.split("_")[1])
+    elif fault == "credential_secret":
+        jobs["credentials-macos"]["steps"].append({"run": "echo ${{ secrets.KEYCHAIN }}"})
+    else:
+        jobs["credentials-linux"]["steps"][-1]["if"] = "always()"
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
+        gate.validate_directory(candidate)
