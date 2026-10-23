@@ -114,7 +114,7 @@
     "tests/test_manage_native.py": "fe5266629ae68e984c4f2aa2d7edd26916c833423472d60d8c9ec48de5e99cb6",
     "tests/test_mcp_host.py": "d3a4c39d9290a136a1e30659134de87ac1c0f93103d07fa13de17cbc1af3745b",
     "tests/test_mcp_schema.py": "fd3f7d238e2d46e720a7a6b777a871cf387238470c8ff5dc993ae653d5dea350",
-    "tests/test_mcp_streaming.py": "ae96834f89eaaa4a8d90dca69f27c0ea46963e99696fd1cc15e5ce4418e950ba",
+    "tests/test_mcp_streaming.py": "a22aec6dc2257644d52a25d273dacfb51d4bb250a6c1d16d1ca356681062b797",
     "tests/test_memory.py": "4754b7a25b6f47ec64ccee3e2278c12c9bd7903c2fadd77258aa112d5fb2eb98",
     "tests/test_memory_edges.py": "66067e330c80f88d954884ab845ecd7f48405cb5a658fae6f525a68ad064ac54",
     "tests/test_memory_io.py": "e3578d0156e5c4d3839a4962556f5462f116858f4af34126709978c5543d8d5a",
