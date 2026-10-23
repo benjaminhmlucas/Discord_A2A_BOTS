@@ -111,7 +111,10 @@ class SafeHTTP:
         *,
         headers: Mapping[str, str] | None = None,
         body: object = None,
+        form: Mapping[str, str] | None = None,
     ) -> AsyncIterator[aiohttp.ClientResponse]:
+        if form is not None and body is not None:
+            raise CapabilityError("Ambiguous request body")
         url = checked_url(destination, self.internal_origins)
         resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
         connector = aiohttp.TCPConnector(resolver=resolver, use_dns_cache=False, force_close=True)
@@ -128,6 +131,7 @@ class SafeHTTP:
                     url,
                     headers={"Accept-Encoding": "identity", **(headers or {})},
                     json=body,
+                    data=form,
                     allow_redirects=False,
                 ) as response:
                     if response.headers.get("Content-Encoding", "identity").lower() != "identity":

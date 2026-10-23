@@ -16,9 +16,27 @@ Nested arguments use a bounded JSON Schema subset, with unsupported references,
 regular expressions and executable extensions denied. Both local and server schemas
 are enforced before dispatch; raw nested leaves/keys are privacy-checked before
 escaping. Stderr is privately drained and bounded, never copied into Discord errors.
-No OAuth/custom-header support (#27), UI (#24), mutating tools (#28) or full native
-installation portability (#25) is claimed here. See [mcp-connections.md](mcp-connections.md)
-for limits, shared API, verification boundaries and per-server acceptance.
+No UI (#24), mutating tools (#28) or full native installation portability (#25) is
+claimed here. See [mcp-connections.md](mcp-connections.md) for limits, shared API,
+verification boundaries and per-server acceptance.
+
+## MCP authentication and credential storage (issue #27)
+
+Profiles hold references only; values live in the OS credential store (Windows
+Credential Manager, macOS Keychain with interaction disabled, Linux Secret Service
+over an encrypted session in a killable 3-second helper) or in explicit read-only
+`BOTBRIDGE_MCP_*` environment variables. There is no plaintext fallback. Each value
+is bound to the installation folder, operator, alias and complete profile, so a
+credential cannot follow an edited endpoint or another connection. OAuth is a
+public-client authorization-code flow with PKCE S256, state/issuer/resource/scope
+binding and a single-use loopback callback; authorization endpoints need their own
+`allowed_origins`/`internal_origins`. Refresh tokens rotate under a cross-process
+lease with generation-fenced commits; `runtime_state/mcp_auth.sqlite3` holds no
+token material. Credentials never enable tools or change identity/policy checks, and
+resolved values join the request's redaction set before results reach a provider.
+Native macOS/Linux stores are exercised in the dedicated `credentials-macos` and
+`credentials-linux` CI jobs with disposable keychains; add both to the required
+checks when the ruleset is next reviewed. See [mcp-authentication.md](mcp-authentication.md).
 
 ## Repository protections
 
@@ -47,8 +65,9 @@ Dependabot PRs; updates must pass the same checks and approval requirements.
 Action updates also need the matching `ACTION_PINS` entry in the policy checker.
 
 Ruff checks and formats shipped Python and tests. Mypy strictly checks the provider
-contract and atomic health I/O boundary; the remaining dynamically configured
-Discord code is not yet fully typed. Bandit blocks all medium/high findings without
+contract, atomic health I/O, capability, MCP connection/transport and
+authentication/credential modules and the connection CLI; the remaining dynamically
+configured Discord code is not yet fully typed. Bandit blocks all medium/high findings without
 rule or vulnerability exclusions. Its remaining low-severity findings identify
 subprocess imports and calls: commands use argument arrays, never user text as shell
 syntax; tree termination addresses owned PIDs. Review these findings when process

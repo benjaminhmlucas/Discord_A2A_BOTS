@@ -75,3 +75,47 @@ jobs:
       - run: npm audit --prefix dependencies/pm2 --audit-level=low
       - run: npm ci --ignore-scripts --prefix dependencies/logrotate
       - run: npm audit --prefix dependencies/logrotate --audit-level=low
+  # Actual native credential stores with disposable entries; no repository secrets.
+  credentials-linux:
+    name: Native credentials (Linux Secret Service)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+      - run: python -m pip install -r requirements-dev.txt
+      # A private session bus and a throwaway unlocked login keyring as the default alias.
+      - run: |
+          mkdir -p "$HOME/.local/share/keyrings"
+          printf login > "$HOME/.local/share/keyrings/default"
+          dbus-run-session -- sh -ec 'printf botbridge-ci | gnome-keyring-daemon --unlock --components=secrets > /dev/null; python -m pytest tests/test_credentials.py tests/test_auth_policy.py tests/test_oauth_grants.py -v'
+        env:
+          BOTBRIDGE_TEST_NATIVE_CREDENTIALS: '1'
+  credentials-macos:
+    name: Native credentials (macOS Keychain)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-dev.txt
+      # A disposable unlocked default keychain; the bridge itself never unlocks or prompts.
+      - run: |
+          chain="$RUNNER_TEMP/botbridge-ci.keychain-db"
+          security create-keychain -p botbridge-ci "$chain"
+          security set-keychain-settings "$chain"
+          security unlock-keychain -p botbridge-ci "$chain"
+          security list-keychains -d user -s "$chain"
+          security default-keychain -d user -s "$chain"
+          python -m pytest tests/test_credentials.py tests/test_auth_policy.py tests/test_oauth_grants.py -v
+        env:
+          BOTBRIDGE_TEST_NATIVE_CREDENTIALS: '1'

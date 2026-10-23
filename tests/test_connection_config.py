@@ -62,7 +62,17 @@ def test_bad_registries(data):
         ("environment", {"ok": 1}),
         ("environment", {"ok": "\0"}),
         ("environment", {"API_TOKEN": "plaintext-denied"}),
-        ("credential_env", {"AUTH": "unscoped"}),
+        ("credentials", {"AUTH": "plaintext-denied"}),
+        ("credentials", {"AUTH": {"source": "environment", "name": "CodexBot_Key"}}),
+        ("credentials", {"bad key": {"source": "native", "name": "fixture"}}),
+        (
+            "credentials",
+            {
+                "FIRST": {"source": "native", "name": "fixture"},
+                "SECOND": {"source": "native", "name": "fixture"},
+            },
+        ),
+        ("credential_env", {}),
     ],
 )
 def test_bad_stdio_profiles(tmp_path, key, value):
@@ -82,20 +92,35 @@ def test_profile_limits_conflicts_and_isolated_editing(tmp_path):
             "transport": "http",
             "endpoint": "http://127.0.0.1",
             "protocol": "2025-11-25",
-            "credential_env": None,
+            "authentication": {"type": "none"},
         },
         {
             "transport": "http",
             "endpoint": "https://example.com",
             "protocol": "old",
-            "credential_env": None,
+            "authentication": {"type": "none"},
         },
         {
             "transport": "http",
             "endpoint": "https://example.com",
             "protocol": "2025-11-25",
-            "credential_env": "ANY",
+            "authentication": "ANY",
         },
+        {
+            "transport": "http",
+            "endpoint": "https://example.com",
+            "protocol": "2025-11-25",
+            "credential_env": None,
+        },
+        *[
+            {
+                "transport": "http",
+                "endpoint": "https://example.com/mcp?" + query,
+                "protocol": "2025-11-25",
+                "authentication": {"type": "none"},
+            }
+            for query in ("api_key=x", "access_token=x", "Signature=x", "session=x")
+        ],
     ):
         with pytest.raises(ValueError):
             Registry({"version": 1, "servers": {"a": bad}}, SafeHTTP())
@@ -103,7 +128,7 @@ def test_profile_limits_conflicts_and_isolated_editing(tmp_path):
     with pytest.raises(ValueError):
         Registry({"version": 1, "servers": {"a": profile}}, SafeHTTP())
     profile = stdio_profile(tmp_path)
-    profile["credential_env"] = {"FIXTURE_SETTING": "BOTBRIDGE_MCP_TEST"}
+    profile["credentials"] = {"FIXTURE_SETTING": {"source": "native", "name": "fixture"}}
     with pytest.raises(ValueError):
         Registry({"version": 1, "servers": {"a": profile}}, SafeHTTP())
     registry = Registry({"version": 1, "servers": {}}, SafeHTTP())

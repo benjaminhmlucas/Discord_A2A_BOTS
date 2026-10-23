@@ -6,16 +6,22 @@ import os
 import re
 from dataclasses import dataclass
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import aiohttp
 from yarl import URL
 
+from bridge_auth_policy import references
+from bridge_authentication import deployment_authentication
 from bridge_authorization import eligible_sender
 from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_memory import MemoryAccess, MemoryRequest
 from bridge_connections import Registry, ConnectionManager, NAME
 from bridge_mcp_schema import bounded, checked_schema, validate
+
+
+ROOT = Path(__file__).resolve().parent
 
 
 def require(condition: object) -> None:
@@ -30,7 +36,9 @@ class CapabilityRequest:
 
 
 class Capabilities:
-    def __init__(self, config: dict[str, Any], log: Callable[[str], None]) -> None:
+    def __init__(
+        self, config: dict[str, Any], log: Callable[[str], None], root: Path = ROOT
+    ) -> None:
         data = config.get("capabilities", {"enabled": False})
         require(isinstance(data, dict) and type(data.get("enabled")) is bool)
         require(
@@ -55,7 +63,8 @@ class Capabilities:
                 raise ValueError("Invalid capabilities configuration") from None
         self.http = SafeHTTP(internal_origins=internal)
         self.registry = Registry(data.get("connections", {"version": 1, "servers": {}}), self.http)
-        self.connections = ConnectionManager(self.registry)
+        self.authentication = deployment_authentication(config, root, self.http)
+        self.connections = ConnectionManager(self.registry, self.authentication)
         self.tools: dict[str, dict[str, Any]] = data.get("tools", {})
         require(isinstance(self.tools, dict) and len(self.tools) <= 32)
         for alias, tool in self.tools.items():
@@ -114,11 +123,11 @@ class Capabilities:
     def refresh_secrets(self) -> None:
         self.secrets.clear()
         self.secrets.update(self.memory.credentials())
+        # Native values join the request's active secrets when resolved; never bulk-read.
         for profile in self.registry.export()["servers"].values():
-            refs = profile["credential_env"]
-            for name in refs.values() if isinstance(refs, dict) else [refs]:
-                value = os.environ.get(name) if name else None
-                if value:
+            for reference in references(profile).values():
+                value = os.environ.get(reference["name"])
+                if reference["source"] == "environment" and value:
                     self.secrets.add(value)
 
     def redact(self, text: str) -> str:

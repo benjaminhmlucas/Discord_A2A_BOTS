@@ -1,0 +1,166 @@
+# MCP authentication and credential storage (issue #27)
+
+Authentication describes **how a connection proves who it is**. It never grants a
+tool, user or bot permission: aliases, allowlists, the read-only gate and private
+destination guards decide what may run, exactly as in
+[MCP connections](mcp-connections.md). Bots run without a GUI or browser; only the
+explicit operator `signin` command can open one.
+
+## Credential references
+
+Profiles store references, never secret values:
+
+```json
+{"source": "native", "name": "docs-token"}
+{"source": "environment", "name": "BOTBRIDGE_MCP_DOCS"}
+```
+
+- `native` names are lowercase (`[a-z][a-z0-9_.-]`, at most 64 characters) and are
+  stored in the operating system's credential store.
+- `environment` names must start with `BOTBRIDGE_MCP_`. They are explicit,
+  read-only and externally managed (for headless deployments, containers or hosts
+  without a usable store). The bridge never writes them.
+
+Each stored value is bound to the installation folder, the configured operator
+(`owner_id`), the connection alias and the **complete** profile. Changing the
+endpoint, protocol, scopes or any other profile field, or using the same reference
+under another alias, finds no credential: set it (or sign in) again. A token can
+therefore never be replayed to a different server or profile. Values are at most
+2560 UTF-8 bytes (the Windows credential limit, applied everywhere) and may not be
+empty or contain NUL.
+
+### Native stores
+
+| OS | Store | Notes |
+| --- | --- | --- |
+| Windows | Credential Manager (generic credentials, current user) | Targets start `BotBridge.MCP/`. |
+| macOS | Default keychain (normally the login keychain), generic passwords | User interaction is disabled; a locked keychain fails instead of prompting. Unlock it outside the bridge. |
+| Linux | Secret Service `default` collection over an encrypted D-Bus session | Requires a running, unlocked Secret Service (for example GNOME Keyring or KeePassXC). Each operation runs in a helper process killed after 3 seconds, so a hung D-Bus peer cannot block the bot. Locked collections and prompts fail closed. |
+
+Linux installs `SecretStorage`, `jeepney` and `cryptography` from
+`requirements.txt` (Linux-only markers). There is **no** plaintext-file fallback:
+an unavailable store reports `unavailable` and the request fails. Use environment
+references explicitly if a host has no store.
+
+## Modes
+
+```json
+{"type": "none"}
+{"type": "bearer", "credential": {"source": "native", "name": "docs-token"}}
+{"type": "headers", "credentials": {"X-API-Key": {"source": "native", "name": "docs-key"}}}
+```
+
+Custom headers are limited to `X-*` names (not `X-Forwarded-*`, `X-Real-*`,
+`X-HTTP-Method-*`) and `Api-Key`, at most eight, case-insensitively unique. Header
+values must be printable ASCII without spaces. Host, Authorization, Cookie and MCP
+protocol headers cannot be set this way.
+
+Stdio profiles use `credentials` instead: `{"ENV_NAME": reference}`. The child
+receives only those resolved values plus the minimal base environment.
+
+### OAuth
+
+```json
+{
+  "type": "oauth",
+  "credential": {"source": "native", "name": "docs-oauth"},
+  "issuer": "https://auth.example.com",
+  "client_id": "pre-registered-public-client",
+  "scopes": ["docs:read"],
+  "allowed_origins": ["https://auth.example.com"],
+  "internal_origins": [],
+  "callback_port": 0
+}
+```
+
+Supported: MCP-compatible discovery (RFC 9728 protected-resource metadata from the
+`WWW-Authenticate` challenge or well-known locations, then RFC 8414 / OpenID
+configuration for the configured issuer), authorization code with PKCE S256, a
+single-use loopback callback on `127.0.0.1`, the `resource` parameter, refresh and
+RFC 7009 revocation. The issuer must be listed by the resource, every metadata,
+token and revocation endpoint must be on an `allowed_origins` origin, and only
+`internal_origins` may be private addresses. Resource `internal_origins` do not
+permit internal authorization servers. Tokens must be bearer tokens with
+`expires_in`; the granted scope must equal the configured scopes. A server asking
+for a scope outside the configured list requires operator approval (a profile edit).
+
+`callback_port` 0 picks a free port; set a fixed port if the authorization server
+requires an exact registered redirect URI (`http://127.0.0.1:PORT/oauth/callback`).
+The callback accepts one request with the matching state and issuer, rejects
+cross-origin/rebound requests and closes after three minutes.
+
+Access and refresh tokens are stored as separate native entries. Only non-secret
+metadata (generation, expiry, lease) is kept in
+`runtime_state/mcp_auth.sqlite3`. All bot processes in one installation share a
+grant: an expired token is refreshed by exactly one process under a short lease
+while others wait and reuse the result. Rotation is committed atomically against
+the grant generation, so a logout or newer sign-in always wins over a late refresh,
+and cancelling a request cannot lose a rotated refresh token. An HTTP 401 from the
+MCP server forces a refresh on the next request; a refused refresh token marks the
+grant `expired` until the operator signs in again.
+
+Unsupported, with clear errors: dynamic client registration and confidential clients
+(`client_id` must be a pre-registered public client), PKCE `plain`, implicit or
+device flows, tokens without `expires_in`, tokens over 2560 bytes, environment
+references for OAuth, browser cookies or desktop/app connector sessions.
+
+## Operator commands
+
+Use this installation's Python interpreter from the installation folder:
+
+```powershell
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json status
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json credential-set docs-server docs-token
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json credential-delete docs-server docs-token
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json signin oauth-server
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json signin oauth-server --no-browser
+.venv\Scripts\python.exe mcp_connections.py --config bridge_config.json logout oauth-server
+```
+
+`credential-set` reads the value from a hidden prompt (or one line of stdin with
+`--stdin`), never from arguments, and validates the reference before prompting.
+Rotation is `credential-set` again; deletion is `credential-delete`. OAuth values
+cannot be set manually. `signin` prints the authorization URL and opens the default
+browser unless `--no-browser` is given. `logout` deletes the local grant first, then
+asks the provider to revoke it: `revoked`, `local_only` (provider has no revocation
+endpoint or refused; revoke it at the provider) or `not_signed_in`.
+
+Output is masked: `authentication` is `none`, `configured`, `required`, `expired`
+or `unavailable`, with per-reference `set`/`not_set`/`unavailable`. Errors from the
+authentication API are static guidance; tokens never appear in CLI output, logs,
+exports, public Discord replies or saved configuration, and a server that reflects a
+token back has it redacted before the provider sees the result. Discord users see
+only the generic capability failure notice; health files record only the error class.
+
+### Troubleshooting
+
+| Status or error | Meaning and action |
+| --- | --- |
+| `required` | Nothing stored for this exact profile: run `credential-set` or `signin`. Also expected after any profile edit. |
+| `expired` | OAuth refresh was refused or no refresh token was issued: `signin` again. |
+| `unavailable` | The native store is locked, missing or unsupported: unlock/start it, or use environment references. |
+| `MCP server rejected the credential` | HTTP 401: rotate the bearer/header value; OAuth retries with a refresh next time. |
+| `OAuth scope requires operator approval` | The server challenged for a scope you did not configure. |
+| `OAuth destination denied` | An endpoint is outside `allowed_origins` or private without `internal_origins`. |
+| `MCP authorization refresh busy` | Another process held the refresh lease for its whole lifetime; retry. |
+
+## Shared API
+
+`bridge_authentication.Authentication` is the single API for the runtime, the CLI
+and the future GUI (#24): `headers`, `environment`, `set_credential`,
+`delete_credential`, `signin` (the caller supplies the browser opener), `logout`,
+`rejected` and masked `status`. `ConnectionManager` resolves credentials through it
+for each request; nothing else reads credential stores.
+
+## Verification and acceptance
+
+| AC | Implementation and evidence |
+| --- | --- |
+| 1: modes through the manager | `test_oauth_grants.py` runs a real loopback MCP resource and authorization server through `ConnectionManager` and `Bridge.handle`: bearer, custom header and OAuth (no-auth is covered by `test_capabilities.py`/`test_connections.py`), and a real stdio child receives only its approved references (`test_connections.py`). |
+| 2: OAuth validation | `test_oauth_discovery.py` and `test_oauth_flow.py` reject issuer/resource/scope/state/PKCE/redirect/replay/network/metadata faults before any token or tool request. |
+| 3: refresh, revocation, concurrency, logout | `test_oauth_grants.py`: rotation, 401 recovery, refused refresh, two processes refreshing once, cancellation still committing, logout winning over a late refresh, failed native writes, cross-alias isolation. |
+| 4: no secret disclosure | Canary tokens are checked absent from CLI output, statuses, errors, SQLite metadata, provider prompts, public replies and audit logs. |
+| 5: native stores | Real Windows Credential Manager in the normal Windows job; real macOS Keychain and Linux Secret Service in the isolated `credentials-macos`/`credentials-linux` jobs with disposable stores. Every adapter also runs on every host through its OS API boundary (`test_credential_adapters.py`). Unavailable stores never fall back. |
+| 6: one API, no GUI needed | CLI and runtime both use `Authentication`; credentials never change tool/user/bot policy. |
+| 7: real boundaries | Only OS keychain/D-Bus APIs and the browser are substituted; authentication, storage logic, leases and HTTP validation are real. Exact 100% statement/branch coverage remains required. |
+| 8: documentation | This guide plus [MCP connections](mcp-connections.md) and [security review](security-review.md). |

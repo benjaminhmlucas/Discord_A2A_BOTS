@@ -3,17 +3,19 @@
 import json
 import os
 from pathlib import Path
+from typing import Any
+from collections.abc import Iterable
 
 ROOT = Path(__file__).resolve().parent
 
 
-def config_path(root=ROOT):
+def config_path(root: str | Path = ROOT) -> Path:
     root = Path(root)
     override = os.environ.get("BOTBRIDGE_CONFIG_FILE") if root.resolve() == ROOT else None
     return Path(override) if override else root / "bridge_config.json"
 
 
-def read_identity_config():
+def read_identity_config() -> Any:
     path = config_path()
     if not path.is_file():
         raise RuntimeError(
@@ -24,26 +26,28 @@ def read_identity_config():
     return config
 
 
-def local_settings():
+def local_settings() -> Any:
     path = ROOT / "local_settings.json"
     if not path.is_file():
         path = ROOT / "local_settings.example.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def local_path(key):
+def local_path(key: str) -> Path:
     path = Path(local_settings()[key]).expanduser()
     return path if path.is_absolute() else ROOT / path
 
 
-def identity_ids(config):
+def identity_ids(config: dict[str, Any]) -> list[int]:
     ids = [config["bot_ids"][key] for key in ("codex", "antigravity", "claude")]
     if len(set(ids)) != 3 or any(type(i) is not int or i <= 0 for i in ids):
         raise ValueError("Configure three distinct numeric bot IDs")
     return ids
 
 
-def validate_runtime_config(config, launch_ids=None):
+def validate_runtime_config(
+    config: dict[str, Any], launch_ids: Iterable[int] | None = None
+) -> dict[str, Any]:
     """One side-effect-free runtime/CLI validator; capabilities validate separately."""
     config = dict(config)
     ids = identity_ids(config)

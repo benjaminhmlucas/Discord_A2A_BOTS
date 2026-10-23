@@ -4,6 +4,7 @@ import asyncio
 import json
 import secrets
 from contextlib import suppress
+from collections.abc import Mapping
 from typing import Any, cast
 
 import aiohttp
@@ -37,17 +38,23 @@ def response_result(value: object, identity: int) -> dict[str, Any] | None:
     return cast(dict[str, Any], value["result"])
 
 
+class AuthorizationRejected(CapabilityError):
+    """The server refused the presented credential (HTTP 401)."""
+
+
 class MCPClient:
     def __init__(
         self,
         http: SafeHTTP,
         destination: str,
-        authorization: str | None = None,
+        authentication: Mapping[str, str] | None = None,
         *,
         protocol: str = PROTOCOL,
         secrets: set[str] | None = None,
     ) -> None:
-        self.http, self.destination, self.authorization = http, destination, authorization
+        self.http, self.destination = http, destination
+        # Pre-validated authentication headers from the shared authentication API.
+        self.authentication = dict(authentication or {})
         if protocol not in (PROTOCOL, PROTOCOL_2025):
             raise CapabilityError("Unsupported MCP protocol")
         self.protocol = protocol
@@ -60,8 +67,7 @@ class MCPClient:
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": self.protocol,
         }
-        if self.authorization:
-            headers["Authorization"] = "Bearer " + self.authorization
+        headers.update(self.authentication)
         if self.session:
             headers["Mcp-Session-Id"] = self.session
         return headers
@@ -92,6 +98,10 @@ class MCPClient:
             body["id"] = identity
         async with self.http.open("POST", self.destination, headers=headers, body=body) as reply:
             # Never follow a credential-bearing redirect, even to another approved origin.
+            if reply.status == 401:
+                raise AuthorizationRejected(
+                    "MCP server rejected the credential; rotate it or sign in again"
+                )
             if identity is None:
                 if reply.status != 202:
                     raise CapabilityError("MCP notification failed")
