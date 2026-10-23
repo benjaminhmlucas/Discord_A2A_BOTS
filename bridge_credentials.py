@@ -398,10 +398,10 @@ class CredentialStore:
                     raise CredentialError("Environment credentials are externally managed")
                 result = os.environ.get(reference["name"])
             else:
+                if action == "set":
+                    value = checked_secret(value)  # Reject bad input before touching a store.
                 operation = getattr(self._backend(), action)
-                result = (
-                    operation(key, checked_secret(value)) if action == "set" else operation(key)
-                )
+                result = operation(key, value) if action == "set" else operation(key)
             return checked_secret(result) if result is not None else None
         except CredentialError:
             raise

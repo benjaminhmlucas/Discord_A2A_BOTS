@@ -93,6 +93,13 @@ def test_unsupported_native_backend_fails_without_environment_fallback():
             store.get(REF, BINDING)
 
 
+@pytest.mark.parametrize("value", ["\ud800", "x" * 2561, "", "\0", None])
+def test_secret_policy_is_checked_before_any_store_on_every_host(value):
+    with patch("sys.platform", "unsupported"), pytest.raises(CredentialError) as error:
+        CredentialStore("test").set(REF, BINDING, value)
+    assert "unsupported" not in str(error.value)  # Rejected before backend selection.
+
+
 @pytest.mark.skipif(
     sys.platform != "win32" and os.environ.get("BOTBRIDGE_TEST_NATIVE_CREDENTIALS") != "1",
     reason="Native keychain requires the isolated credential CI/session",

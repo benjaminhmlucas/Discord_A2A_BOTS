@@ -55,7 +55,10 @@ async def peer(*, token_changes=None, bad_issuer=False, deny=False):
                 if deny
                 else {"code": "synthetic-code"}
             )
-            raise web.HTTPFound(location=str(URL(query["redirect_uri"]).with_query(response)))
+            # The simulated browser follows this location; the peer issues no open redirect.
+            return web.json_response(
+                {"location": str(URL(query["redirect_uri"]).with_query(response))}
+            )
         if request.path == "/token":
             assert request.content_type == "application/x-www-form-urlencoded"
             fields = dict(await request.post())
@@ -120,8 +123,11 @@ async def peer(*, token_changes=None, bad_issuer=False, deny=False):
 
 async def browser(url):
     # Simulates only the browser boundary; authorization, token and callback are real HTTP.
+    # The authorization peer returns its redirect target instead of issuing a 302.
     async with ClientSession() as session:
         async with session.get(url) as response:
+            location = (await response.json())["location"]
+        async with session.get(location) as response:
             return await response.text()
 
 

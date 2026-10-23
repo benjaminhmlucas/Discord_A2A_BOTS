@@ -135,7 +135,8 @@ class OAuthService:
             target = URL(query["redirect_uri"]).with_query(
                 {"state": query["state"], "code": "synthetic-code", "iss": origin}
             )
-            raise web.HTTPFound(location=str(target))
+            # The simulated browser follows this location; the peer issues no open redirect.
+            return web.json_response({"location": str(target)})
         if request.path == "/token":
             fields = dict(await request.post())
             self.exchanges.append(fields["grant_type"])
@@ -169,8 +170,11 @@ class OAuthService:
 
 async def browser(url):
     # Simulates only the browser; authorization, callback and token exchange are real HTTP.
+    # The authorization peer returns its redirect target instead of issuing a 302.
     async with ClientSession() as session:
         async with session.get(url) as response:
+            location = (await response.json())["location"]
+        async with session.get(location) as response:
             await response.read()
 
 
@@ -617,6 +621,15 @@ def test_bearer_rejection_and_stdio_native_credentials_use_the_same_api(tmp_path
                     "LOCAL_TOKEN": TOKEN_PREFIX + "with space"
                 }
                 assert (await auth.status("local", local))["credentials"] == {"local-token": "set"}
+                # An unavailable store is reported, never replaced by another source.
+                backend = auth.store._native
+                with patch("sys.platform", "unsupported"):
+                    auth.store._native = None
+                    assert await auth.status("local", local) == {
+                        "authentication": "unavailable",
+                        "credentials": {"local-token": "unavailable"},
+                    }
+                auth.store._native = backend
                 await auth.delete_credential("local", local, "local-token")
                 with pytest.raises(AuthenticationError, match="does not use OAuth"):
                     await auth.logout("local", local, set())
