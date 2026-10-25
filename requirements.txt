@@ -10,7 +10,7 @@ propcache==0.5.4
 typing_extensions==4.16.0
 yarl==1.25.1
 pip==26.2.1
-setuptools==84.0.0
+setuptools==84.1.0
 # Linux Secret Service adapter only (macOS/Windows use OS APIs through ctypes).
 SecretStorage==3.5.0; sys_platform == "linux"
 jeepney==0.9.0; sys_platform == "linux"
