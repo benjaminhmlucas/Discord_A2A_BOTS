@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+import warnings
 import webbrowser
 
 import aiohttp
@@ -75,7 +76,15 @@ async def status(caps: Capabilities, name: str) -> dict[str, Any]:
 def secret_input(use_stdin: bool) -> str:
     if use_stdin:
         return sys.stdin.readline().rstrip("\r\n")
-    return getpass.getpass("Credential value (input hidden): ")
+    try:
+        with warnings.catch_warnings():
+            # getpass warns immediately before falling back to visibly echoed input.
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            return getpass.getpass("Credential value (input hidden): ")
+    except getpass.GetPassWarning:
+        raise CredentialError(
+            "Hidden credential input unavailable; use --stdin with a secure input source"
+        ) from None
 
 
 async def open_browser(url: str, launch: bool) -> None:

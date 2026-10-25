@@ -25,15 +25,24 @@ verification boundaries and per-server acceptance.
 Profiles hold references only; values live in the OS credential store (Windows
 Credential Manager, macOS Keychain with interaction disabled, Linux Secret Service
 over an encrypted session in a killable 3-second helper) or in explicit read-only
-`BOTBRIDGE_MCP_*` environment variables. There is no plaintext fallback. Each value
-is bound to the installation folder, operator, alias and complete profile, so a
-credential cannot follow an edited endpoint or another connection. OAuth is a
+`BOTBRIDGE_MCP_*` environment variables. There is no plaintext fallback. Native
+values are bound to the installation folder, operator, alias and complete profile,
+so they cannot follow an edited endpoint or another connection. Environment
+references intentionally reuse externally managed values; use distinct variable
+names when profiles need isolation. OAuth is a
 public-client authorization-code flow with PKCE S256, state/issuer/resource/scope
 binding and a single-use loopback callback; authorization endpoints need their own
 `allowed_origins`/`internal_origins`. Refresh tokens rotate under a cross-process
 lease with generation-fenced commits; `runtime_state/mcp_auth.sqlite3` holds no
 token material. Credentials never enable tools or change identity/policy checks, and
 resolved values join the request's redaction set before results reach a provider.
+Available native values are read off-loop before argument/context filtering and
+retained through public-reply filtering. The selected tool's arguments are checked
+again against its actual resolved credentials immediately before dispatch. Failed
+native cleanup cannot roll back logout's inactive generation; a late HTTP 401 only
+expires the token that was actually presented. Browser authorization URLs receive
+a bounded IPv4/IPv6 DNS preflight, but the external browser's later resolution and
+redirects cannot be pinned by the bridge.
 Native macOS/Linux stores are exercised in the dedicated `credentials-macos` and
 `credentials-linux` CI jobs with disposable keychains; add both to the required
 checks when the ruleset is next reviewed. See [mcp-authentication.md](mcp-authentication.md).

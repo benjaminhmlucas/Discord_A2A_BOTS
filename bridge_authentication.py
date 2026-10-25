@@ -74,10 +74,29 @@ class Authentication:
             result[name] = await self.credential(ref, binding, secrets)
         return result
 
-    async def rejected(self, connection: str, profile: dict[str, Any]) -> None:
+    async def rejected(
+        self, connection: str, profile: dict[str, Any], presented: str | None = None
+    ) -> None:
         """A server refused the presented credential; OAuth refreshes next time."""
         if self.oauth_profile(profile):
-            await self.oauth.rejected(profile, self.binding(connection, profile))
+            await self.oauth.rejected(profile, self.binding(connection, profile), presented)
+
+    async def known_secrets(self, connection: str, profile: dict[str, Any]) -> set[str]:
+        """Read available configured values for DLP without refreshing or opening a server."""
+        binding = self.binding(connection, profile)
+        found = set()
+        parts = ("access", "refresh") if self.oauth_profile(profile) else ("value",)
+        for reference in references(profile).values():
+            for part in parts:
+                try:
+                    value = await asyncio.to_thread(self.store.get, reference, binding, part)
+                except CredentialError:
+                    # Unused/unavailable stores do not disable ordinary chat. The
+                    # selected transport still requires its credential before dispatch.
+                    continue
+                if value is not None:
+                    found.add(value)
+        return found
 
     def settable(self, profile: dict[str, Any], name: str) -> dict[str, str]:
         require(

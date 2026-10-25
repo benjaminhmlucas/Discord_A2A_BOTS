@@ -18,7 +18,7 @@ import time
 from typing import Any, AsyncIterator
 
 from bridge_auth_policy import AuthenticationError
-from bridge_credentials import CredentialStore
+from bridge_credentials import CredentialError, CredentialStore
 from bridge_http import SafeHTTP
 from bridge_oauth_flow import GrantRejected, OAuthFlow
 
@@ -124,8 +124,19 @@ class GrantStore:
                 (refreshable, binding, generation),
             )
 
+    def reject(self, reference: dict[str, str], binding: str, presented: str) -> None:
+        """Reject only the exact token presented, while serializing sign-in and rotation."""
+        with self.transaction() as db:
+            row = self.row(db, binding)
+            if row is not None and row["active"]:
+                access = self.store.get(reference, binding, "access")
+                if access is not None and presented == "Bearer " + access:
+                    db.execute("UPDATE oauth_grants SET expires = 0 WHERE binding = ?", (binding,))
+
     def remove(self, reference: dict[str, str], binding: str) -> dict[str, Any] | None:
         """Deactivate first, then delete native tokens; returns them for remote revocation."""
+        failure = False
+        tokens: dict[str, str | None] = {"refresh": None, "access": None}
         with self.transaction() as db:
             row = self.row(db, binding)
             if row is None:
@@ -135,11 +146,19 @@ class GrantStore:
                 " refreshable = 0 WHERE binding = ?",
                 (binding,),
             )
-            tokens = {
-                part: self.store.get(reference, binding, part) for part in ("refresh", "access")
-            }
             for part in ("refresh", "access"):
-                self.store.delete(reference, binding, part)
+                try:
+                    tokens[part] = self.store.get(reference, binding, part)
+                except CredentialError:
+                    failure = True
+                try:
+                    self.store.delete(reference, binding, part)
+                except CredentialError:
+                    failure = True
+            # Commit the inactive generation even when native cleanup fails. Keep
+            # cleanup inside this transaction so it cannot delete a newer sign-in.
+        if failure:
+            raise CredentialError("MCP grant disabled; native cleanup failed, retry logout")
         issuer, resource, scopes = json.loads(row["grant_binding"])
         return {
             "issuer": issuer,
@@ -253,11 +272,12 @@ class OAuthTokens:
             handled = {refresh, grant["access_token"], grant["refresh_token"]} - {None}
             return str(grant["access_token"]), handled
 
-    async def rejected(self, profile: dict[str, Any], binding: str) -> None:
+    async def rejected(
+        self, profile: dict[str, Any], binding: str, presented: str | None = None
+    ) -> None:
         reference = profile["authentication"]["credential"]
-        row, _ = await asyncio.to_thread(self.grants.load, reference, binding)
-        if row is not None:
-            await asyncio.to_thread(self.grants.mark, binding, row["generation"], refreshable=True)
+        if presented is not None:
+            await asyncio.to_thread(self.grants.reject, reference, binding, presented)
 
     async def signin(
         self,

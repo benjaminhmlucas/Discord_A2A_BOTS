@@ -21,11 +21,13 @@ Profiles store references, never secret values:
   read-only and externally managed (for headless deployments, containers or hosts
   without a usable store). The bridge never writes them.
 
-Each stored value is bound to the installation folder, the configured operator
+Each native stored value is bound to the installation folder, the configured operator
 (`owner_id`), the connection alias and the **complete** profile. Changing the
 endpoint, protocol, scopes or any other profile field, or using the same reference
 under another alias, finds no credential: set it (or sign in) again. A token can
-therefore never be replayed to a different server or profile. Values are at most
+therefore not follow a profile edit or another alias. Environment references are
+externally managed: profiles using the same environment name intentionally read
+the same value, so operators must use distinct variables for isolation. Values are at most
 2560 UTF-8 bytes (the Windows credential limit, applied everywhere) and may not be
 empty or contain NUL.
 
@@ -77,12 +79,20 @@ Supported: MCP-compatible discovery (RFC 9728 protected-resource metadata from t
 `WWW-Authenticate` challenge or well-known locations, then RFC 8414 / OpenID
 configuration for the configured issuer), authorization code with PKCE S256, a
 single-use loopback callback on `127.0.0.1`, the `resource` parameter, refresh and
-RFC 7009 revocation. The issuer must be listed by the resource, every metadata,
-token and revocation endpoint must be on an `allowed_origins` origin, and only
+RFC 7009 revocation. The issuer must be listed by the resource. Protected-resource
+metadata stays on the MCP resource's origin; authorization-server metadata and
+authorization/token/revocation endpoints must be on an `allowed_origins` origin. Only
 `internal_origins` may be private addresses. Resource `internal_origins` do not
 permit internal authorization servers. Tokens must be bearer tokens with
 `expires_in`; the granted scope must equal the configured scopes. A server asking
 for a scope outside the configured list requires operator approval (a profile edit).
+The client binds authorization/token requests and stored grants to the intended
+resource; the resource server validates the audience of opaque access tokens.
+
+The authorization URL also receives a DNS admission check before it is printed or
+opened. The system browser controls subsequent DNS resolution and redirects; the
+bridge cannot pin that browser's connection against DNS rebinding. Configure only
+trusted authorization origins and review the address shown during sign-in.
 
 `callback_port` 0 picks a free port; set a fixed port if the authorization server
 requires an exact registered redirect URI (`http://127.0.0.1:PORT/oauth/callback`).
@@ -132,6 +142,13 @@ exports, public Discord replies or saved configuration, and a server that reflec
 token back has it redacted before the provider sees the result. Discord users see
 only the generic capability failure notice; health files record only the error class.
 
+Available configured native and environment values are read before argument and
+provider-context filtering, including ordinary chat. Native reads run off the event
+loop with at most four profile readers at once; this does not refresh grants or
+start servers. An unavailable unused store does not disable chat; a selected
+connection still requires its credential before dispatch. Values that cannot be
+read cannot be included in the redaction snapshot.
+
 ### Troubleshooting
 
 | Status or error | Meaning and action |
@@ -143,6 +160,7 @@ only the generic capability failure notice; health files record only the error c
 | `OAuth scope requires operator approval` | The server challenged for a scope you did not configure. |
 | `OAuth destination denied` | An endpoint is outside `allowed_origins` or private without `internal_origins`. |
 | `MCP authorization refresh busy` | Another process held the refresh lease for its whole lifetime; retry. |
+| `MCP grant disabled; native cleanup failed` | Local dispatch is disabled. Retry logout to remove remaining native entries, and revoke access at the provider if remote revocation was not completed. |
 
 ## Shared API
 
@@ -157,10 +175,10 @@ for each request; nothing else reads credential stores.
 | AC | Implementation and evidence |
 | --- | --- |
 | 1: modes through the manager | `test_oauth_grants.py` runs a real loopback MCP resource and authorization server through `ConnectionManager` and `Bridge.handle`: bearer, custom header and OAuth (no-auth is covered by `test_capabilities.py`/`test_connections.py`), and a real stdio child receives only its approved references (`test_connections.py`). |
-| 2: OAuth validation | `test_oauth_discovery.py` and `test_oauth_flow.py` reject issuer/resource/scope/state/PKCE/redirect/replay/network/metadata faults before any token or tool request. |
-| 3: refresh, revocation, concurrency, logout | `test_oauth_grants.py`: rotation, 401 recovery, refused refresh, two processes refreshing once, cancellation still committing, logout winning over a late refresh, failed native writes, cross-alias isolation. |
-| 4: no secret disclosure | Canary tokens are checked absent from CLI output, statuses, errors, SQLite metadata, provider prompts, public replies and audit logs. |
+| 2: OAuth validation | `test_oauth_discovery.py`, `test_oauth_flow.py` and `test_oauth_browser_boundary.py` exercise issuer/resource/scope/state/PKCE/callback/replay and IPv4/IPv6 admission. |
+| 3: refresh, revocation, concurrency, logout | `test_oauth_grants.py` and `test_auth_races_regression.py`: rotation, 401 recovery, concurrent refresh, cancellation, native cleanup failure, logout/late-refresh and stale-401/new-sign-in races. |
+| 4: no secret disclosure | Canary checks cover CLI, statuses, SQLite, configuration exports, tool arguments, original/public provider context and public replies. `test_credential_dispatch_guard.py` covers a transient native snapshot read failure before actual credential resolution. |
 | 5: native stores | Real Windows Credential Manager in the normal Windows job; real macOS Keychain and Linux Secret Service in the isolated `credentials-macos`/`credentials-linux` jobs with disposable stores. Every adapter also runs on every host through its OS API boundary (`test_credential_adapters.py`). Unavailable stores never fall back. |
-| 6: one API, no GUI needed | CLI and runtime both use `Authentication`; credentials never change tool/user/bot policy. |
-| 7: real boundaries | Only OS keychain/D-Bus APIs and the browser are substituted; authentication, storage logic, leases and HTTP validation are real. Exact 100% statement/branch coverage remains required. |
+| 6: one API, no GUI needed | CLI and runtime use `Authentication`; the same API is available to the future GUI. Credentials never change tool/user/bot policy. `test_cli_secret_input.py` verifies hidden input fails before echoed fallback. |
+| 7: real boundaries | Core authentication, storage, leases and HTTP admission run unchanged against controlled peers. OS/DNS/browser/input faults and CLI error-reporting injection are identified in tests. Exact 100% statement/branch coverage remains required. |
 | 8: documentation | This guide plus [MCP connections](mcp-connections.md) and [security review](security-review.md). |

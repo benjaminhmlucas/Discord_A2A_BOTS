@@ -186,6 +186,7 @@ class OAuthFlow:
                         "resource": self.discovery.resource,
                     }
                 )
+                await self.discovery.http.validate_browser_destination(str(url))
                 await open_authorization(str(url))
                 code = await callback.wait(seconds)
                 return await self.exchange(

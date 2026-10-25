@@ -41,6 +41,10 @@ def response_result(value: object, identity: int) -> dict[str, Any] | None:
 class AuthorizationRejected(CapabilityError):
     """The server refused the presented credential (HTTP 401)."""
 
+    def __init__(self, message: str, *, authorization: str | None = None) -> None:
+        super().__init__(message)
+        self.authorization = authorization  # Never included in the diagnostic/args.
+
 
 class MCPClient:
     def __init__(
@@ -100,7 +104,8 @@ class MCPClient:
             # Never follow a credential-bearing redirect, even to another approved origin.
             if reply.status == 401:
                 raise AuthorizationRejected(
-                    "MCP server rejected the credential; rotate it or sign in again"
+                    "MCP server rejected the credential; rotate it or sign in again",
+                    authorization=headers.get("Authorization"),
                 )
             if identity is None:
                 if reply.status != 202:

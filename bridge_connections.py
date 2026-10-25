@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 import copy
 import json
 from pathlib import Path
@@ -204,9 +204,11 @@ class ConnectionManager:
                 client = await self.connect(name, credentials)
                 yield client
                 self._states[name] = "completed"
-            except AuthorizationRejected:
+            except AuthorizationRejected as error:
                 self._states[name] = "rejected"
-                await self.authentication.rejected(name, self.registry.profile(name))
+                await self.authentication.rejected(
+                    name, self.registry.profile(name), error.authorization
+                )
                 raise
             except BaseException:
                 if client is not None or name not in self._active:
@@ -228,7 +230,11 @@ class ConnectionManager:
         tool: str,
         arguments: dict[str, Any],
         credentials: set[str],
+        *,
+        before_dispatch: Callable[[], None] | None = None,
     ) -> str:
         # Caller must authorize this explicit tool and its arguments before entering.
         async with self.session(name, credentials) as client:
+            if before_dispatch is not None:
+                before_dispatch()  # Recheck against the credentials actually presented.
             return await client.tool_call(tool, arguments)

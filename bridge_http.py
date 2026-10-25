@@ -103,6 +103,20 @@ class SafeHTTP:
         self.internal_origins = tuple(internal_origins)
         self.max_bytes, self.seconds, self.redirects = max_bytes, seconds, redirects
 
+    async def validate_browser_destination(self, destination: str) -> None:
+        """Apply DNS admission before handing an authorization URL to a browser.
+
+        The browser owns its subsequent resolution/redirects; this preflight cannot
+        pin its socket like open() does for bridge-owned HTTP requests.
+        """
+        url = checked_url(destination, self.internal_origins)
+        resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
+        try:
+            async with asyncio.timeout(self.seconds):
+                await resolver.resolve(str(url.host), url.port or 443, family=socket.AF_UNSPEC)
+        finally:
+            await resolver.close()
+
     @asynccontextmanager
     async def open(
         self,
