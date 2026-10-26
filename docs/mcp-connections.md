@@ -148,7 +148,10 @@ Use this checkout's Python interpreter; Windows examples:
 `status` reports this manager instance plus masked authentication state; a fresh
 CLI invocation has no connected sessions and does not probe existing bot processes.
 Credential and sign-in commands are documented in
-[MCP authentication](mcp-authentication.md). `test` performs initialization
+[MCP authentication](mcp-authentication.md). Before editing, renaming or removing
+a profile, use its original configuration to log out or delete its native
+credentials; offline exports do not revoke grants or clean up the old binding.
+Keep the original configuration until cleanup succeeds. `test` performs initialization
 and discovery, not a tool call. `discover` adds tool names only, not descriptions or
 schemas. Diagnostic sessions disconnect before returning; output reports
 `connected: false` and the completed/failed/rejected outcome. Future long-lived

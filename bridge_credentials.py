@@ -16,7 +16,7 @@ import subprocess
 import sys
 from typing import Any
 
-from bridge_http import CapabilityError
+from bridge_errors import CapabilityError
 from scripts.console_windows import creation_flags
 
 NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")

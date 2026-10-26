@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 import aiohttp
 from yarl import URL
 
+from bridge_errors import CapabilityError as CapabilityError
+
 V6_SPECIAL = tuple(
     ipaddress.IPv6Network(value)
     for value in (
@@ -21,10 +23,6 @@ V6_SPECIAL = tuple(
 )
 V4_SPECIAL = ipaddress.IPv4Network("192.0.0.0/24")
 V4_ANYCAST = {ipaddress.IPv4Address("192.0.0.9"), ipaddress.IPv4Address("192.0.0.10")}
-
-
-class CapabilityError(ValueError):
-    """Static messages only: request data, credentials and server errors stay private."""
 
 
 def public_address(value: str) -> bool:

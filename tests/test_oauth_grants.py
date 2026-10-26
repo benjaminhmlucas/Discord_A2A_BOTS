@@ -546,7 +546,7 @@ def test_grant_edge_paths_store_failures_and_races(tmp_path):
                 grants.release(binding, "other-process")
                 with pytest.raises(AuthenticationError, match="sign-in required"):
                     await waiter
-                # A failed native write rolls back metadata and reports a static error.
+                # A failed native write disables the grant and reports a static error.
                 caps.authentication.store._native = FailingWrites()
                 with pytest.raises(Exception) as error:
                     await auth.signin("docs", profile, browser, set())

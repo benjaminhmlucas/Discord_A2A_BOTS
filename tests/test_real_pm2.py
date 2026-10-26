@@ -20,8 +20,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_path):
-    if not native.NODE or not native.POWERSHELL:
-        pytest.fail("Real PM2 integration requires Node and PowerShell 7")
+    native.require_windows_runtime()
     root = tmp_path / "real PM2 setup & isolated"
     root.mkdir()
     native.export_into(root)

@@ -31,6 +31,21 @@ the same value, so operators must use distinct variables for isolation. Values a
 2560 UTF-8 bytes (the Windows credential limit, applied everywhere) and may not be
 empty or contain NUL.
 
+### Clean up before editing or removing a profile
+
+Before changing an alias or any profile field, use the original configuration to
+run `logout` for OAuth, or `credential-delete` for each native bearer/header/stdio
+reference. Confirm cleanup succeeds before applying the edited/exported config.
+These explicit operations remove the old native entries; OAuth logout also attempts
+provider revocation. Offline profile exports do not silently delete credentials or
+revoke access. Environment variables remain externally managed.
+
+If a profile was already edited, use a retained copy of its original configuration
+from the same installation folder to run those cleanup commands, then configure
+the new profile. Without the original binding, revoke access at the provider and
+remove only the identified old native entries using the OS credential manager.
+Editing a profile alone does not remove old secrets or revoke a provider grant.
+
 ### Native stores
 
 | OS | Store | Notes |
@@ -43,6 +58,10 @@ Linux installs `SecretStorage`, `jeepney` and `cryptography` from
 `requirements.txt` (Linux-only markers). There is **no** plaintext-file fallback:
 an unavailable store reports `unavailable` and the request fails. Use environment
 references explicitly if a host has no store.
+
+Native credential helpers import only lightweight shared errors and native-store
+code, not the HTTP client stack. Reads remain fresh for each request's redaction
+snapshot rather than caching credential values across requests.
 
 ## Modes
 
@@ -108,6 +127,11 @@ the grant generation, so a logout or newer sign-in always wins over a late refre
 and cancelling a request cannot lose a rotated refresh token. An HTTP 401 from the
 MCP server forces a refresh on the next request; a refused refresh token marks the
 grant `expired` until the operator signs in again.
+
+If a native token write fails, partial entries are deleted when possible and an
+inactive grant record is committed. No token from that failed save can be dispatched;
+if native cleanup also failed, `logout` can find that record and retry cleanup.
+Revoke access at the provider if remote revocation was not completed.
 
 Unsupported, with clear errors: dynamic client registration and confidential clients
 (`client_id` must be a pre-registered public client), PKCE `plain`, implicit or

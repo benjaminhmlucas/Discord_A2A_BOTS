@@ -82,35 +82,51 @@ class GrantStore:
         expected: int | None,
     ) -> bool:
         """Store a sign-in (expected None) or a refresh of one exact generation."""
+        failed = False
         with self.transaction() as db:
             row = self.row(db, binding)
             if expected is not None and (
                 row is None or not row["active"] or row["generation"] != expected
             ):
                 return False  # A logout or newer sign-in won; discard these tokens.
-            # Refresh first: a failed later write leaves an expired row that refreshes.
-            if grant["refresh_token"] is None:
-                self.store.delete(reference, binding, "refresh")
-            else:
-                self.store.set(reference, binding, grant["refresh_token"], "refresh")
-            self.store.set(reference, binding, grant["access_token"], "access")
+            try:
+                if grant["refresh_token"] is None:
+                    self.store.delete(reference, binding, "refresh")
+                else:
+                    self.store.set(reference, binding, grant["refresh_token"], "refresh")
+                self.store.set(reference, binding, grant["access_token"], "access")
+            except CredentialError:
+                failed = True
+                # Native stores cannot join the SQLite transaction. Remove any
+                # partial write and commit an inactive generation even if cleanup
+                # fails, so logout can find and retry orphaned native entries.
+                for part in ("refresh", "access"):
+                    try:
+                        self.store.delete(reference, binding, part)
+                    except CredentialError:
+                        pass
             identity = json.dumps(
                 [grant["issuer"], grant["resource"], grant["scopes"]], separators=(",", ":")
             )
             db.execute(
-                "INSERT INTO oauth_grants VALUES (?, ?, 1, ?, ?, ?) ON CONFLICT(binding)"
-                " DO UPDATE SET generation = excluded.generation, active = 1,"
+                "INSERT INTO oauth_grants VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(binding)"
+                " DO UPDATE SET generation = excluded.generation, active = excluded.active,"
                 " expires = excluded.expires, refreshable = excluded.refreshable,"
                 " grant_binding = excluded.grant_binding",
                 (
                     binding,
                     (row["generation"] if row else 0) + 1,
-                    grant["expires_at"],
-                    grant["refresh_token"] is not None,
+                    not failed,
+                    grant["expires_at"] if not failed else 0,
+                    not failed and grant["refresh_token"] is not None,
                     identity,
                 ),
             )
-            return True
+        if failed:
+            raise CredentialError(
+                "MCP grant disabled after native write failure; run logout for cleanup and revoke at the provider"
+            )
+        return True
 
     def refresh_token(self, reference: dict[str, str], binding: str) -> str | None:
         return self.store.get(reference, binding, "refresh")
