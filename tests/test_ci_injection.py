@@ -623,3 +623,13 @@ def test_native_credential_jobs_cannot_be_widened(candidate, fault, code):
     save(candidate, data)
     with pytest.raises(gate.PolicyError, match=f"^{code}$"):
         gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize("job", ["credentials-linux", "credentials-macos"])
+def test_native_credential_action_inputs_cannot_reference_secrets(candidate, job):
+    data = load(candidate)
+    python_step = data["jobs"][job]["steps"][1]
+    python_step["with"]["python-version"] = "${{ secrets.SYNTHETIC_CREDENTIAL }}"
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match="^untrusted_expression$"):
+        gate.validate_directory(candidate)

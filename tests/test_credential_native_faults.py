@@ -36,9 +36,9 @@ def test_mac_mutations_never_read_or_decode_existing_malformed_blob(operation):
     )
     backend.core = SimpleNamespace(CFRelease=lambda *_: calls.append("release"))
     if operation == "set":
-        backend.set("fixture", "new-valid-secret")
+        backend.set("BotBridge.MCP/test/fixture", "new-valid-secret")
     else:
-        backend.delete("fixture")
+        backend.delete("BotBridge.MCP/test/fixture")
     assert calls == ["find-item-only", "mutate", "release"]
 
 
@@ -56,7 +56,7 @@ def test_linux_hung_native_worker_is_killed_and_waited_before_error():
     started = time.monotonic()
     with patch("subprocess.Popen", launch):
         with pytest.raises(CredentialError, match="timed out"):
-            LinuxCredentials().get("BotBridge.MCP/fixture")
+            LinuxCredentials().get("BotBridge.MCP/test/fixture")
     assert 2.5 <= time.monotonic() - started < 8
     assert len(children) == 1 and children[0].poll() is not None
     # A new worker runs immediately; there is no abandoned executor/native process.
@@ -66,4 +66,4 @@ def test_linux_hung_native_worker_is_killed_and_waited_before_error():
             [sys.executable, "-c", "print('{\"value\":null}')"], *args, **kwargs
         ),
     ):
-        assert LinuxCredentials().get("BotBridge.MCP/fixture") is None
+        assert LinuxCredentials().get("BotBridge.MCP/test/fixture") is None

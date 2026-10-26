@@ -14,6 +14,10 @@ The Node command in README uses V8 coverage and requires 100% lines, branches an
 
 `test_prompt_injection.py` uses actual authorization, SQLite transactions and private-marker files; only Discord transport and model output are substitutes. `test_ci_injection.py` runs the real policy checker on hostile YAML and through its real CLI, without executing candidate workflow commands. Fixtures cover PR metadata/diffs/docs, quoted approvals, web content and MCP/tool results as untrusted text. These checks do not certify a live provider's sandbox or detect every malicious natural-language instruction; see [the AC/evidence map and limits](prompt-injection.md).
 
+## Native credential safety in pytest
+
+An autouse guard permits native adapter get/set/delete calls only for reserved `test`/`test-<hex>` namespaces or deployment namespaces registered from roots inside pytest basetemp. It also guards the Linux direct SDK entry point and records swallowed violations as test failures. It is active before collection and throughout local and native CI runs. Never run the suite from a live installation folder. This prevents accidental adapter misuse; it is not a sandbox for malicious test code.
+
 ## Windows integration
 
 `tests/test_native_setup.py` runs these checks automatically as part of pytest on Windows:
