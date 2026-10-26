@@ -96,6 +96,12 @@ class GrantStore:
                     self.store.set(reference, binding, grant["refresh_token"], "refresh")
                 self.store.set(reference, binding, grant["access_token"], "access")
             except CredentialError:
+                if expected is not None:
+                    # Refresh failures must roll back metadata and retain native
+                    # entries: a stored rotated refresh token allows the next
+                    # request to recover. Only explicit sign-in disables/cleans
+                    # a partially overwritten grant; it has no retryable old grant.
+                    raise
                 failed = True
                 # Native stores cannot join the SQLite transaction. Remove any
                 # partial write and commit an inactive generation even if cleanup

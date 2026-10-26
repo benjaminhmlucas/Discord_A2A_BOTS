@@ -128,10 +128,16 @@ and cancelling a request cannot lose a rotated refresh token. An HTTP 401 from t
 MCP server forces a refresh on the next request; a refused refresh token marks the
 grant `expired` until the operator signs in again.
 
-If a native token write fails, partial entries are deleted when possible and an
+If a native token write fails during explicit sign-in, partial entries are deleted when possible and an
 inactive grant record is committed. No token from that failed save can be dispatched;
 if native cleanup also failed, `logout` can find that record and retry cleanup.
 Revoke access at the provider if remote revocation was not completed.
+
+Automatic refresh differs: a native write failure rolls back metadata and preserves
+the token entries, including any rotated refresh token already stored. The next
+request retries without requiring sign-in. If the refresh-token write failed before
+storing a rotated token, the provider may refuse the old token on retry; the normal
+rejected-grant path then marks the grant expired without deleting it.
 
 Unsupported, with clear errors: dynamic client registration and confidential clients
 (`client_id` must be a pre-registered public client), PKCE `plain`, implicit or
