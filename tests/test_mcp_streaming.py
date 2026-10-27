@@ -189,6 +189,13 @@ def test_active_request_cancellation_and_timeout_signal(legacy, session, stage, 
             )
             task = asyncio.create_task(call_client(client, "read_example", {}))
             await asyncio.wait_for(server.started.wait(), 1)
+            if stage == "initialize" and session:
+                # The server having sent headers does not mean the client has read them
+                # (Python 3.12 schedules the cancel first). Interrupt only once the client
+                # actually holds the session it must terminate.
+                async with asyncio.timeout(1):
+                    while client.session is None:
+                        await asyncio.sleep(0.005)
             if not timeout:
                 task.cancel()
             with pytest.raises(asyncio.TimeoutError if timeout else asyncio.CancelledError):

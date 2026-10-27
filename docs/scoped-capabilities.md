@@ -48,7 +48,10 @@ verified for your read-only server before considering enablement:
         "transport": "http",
         "endpoint": "https://mcp.example.com/mcp",
         "protocol": "2025-11-25",
-        "credential_env": "BOTBRIDGE_MCP_DOCS"
+        "authentication": {
+          "type": "bearer",
+          "credential": {"source": "environment", "name": "BOTBRIDGE_MCP_DOCS"}
+        }
       }
     }
   },
@@ -77,10 +80,12 @@ Every tool needs its own explicit user/bot scope. At most 32 aliases are allowed
 argument graphs share the [schema and size limits](mcp-connections.md).
 Search aliases require the exact query-only input schema shown above.
 The unreleased inline HTTP/`parameters` format is replaced, with no migration path.
-`credential_env: null` selects an unauthenticated server. Credential names must start
-with `BOTBRIDGE_MCP_` and use uppercase ASCII; existing Discord/provider credentials
+`{"type": "none"}` selects an unauthenticated server. Environment reference names must
+start with `BOTBRIDGE_MCP_` and use uppercase ASCII; existing Discord/provider credentials
 cannot be selected. Set the value in the bot process environment without committing it
-or posting it in Discord, then restart through the normal deployment process.
+or posting it in Discord, then restart through the normal deployment process. Native
+OS credential stores, custom headers and OAuth sign-in are described in
+[mcp-authentication.md](mcp-authentication.md).
 
 All configured tools must have `read_only: true`; other values fail configuration
 validation, including when requested by the owner. This ticket provides no new file writes,
@@ -133,8 +138,9 @@ client signals it but cannot guarantee remote execution stops. Sensitive session
 only for the active bridge request. The client does not import server instructions, roots, sampling, elicitation, provider
 configuration, hooks or plugins. Server-initiated requests, input requests, non-text
 results and schemas requiring `x-mcp-header` mirroring fail closed. There are no
-subscriptions, reconnections or persisted sessions. Other protocol revisions, legacy
-HTTP+SSE transports and OAuth discovery are unsupported. Local stdio 2025-11-25 is
+subscriptions, reconnections or persisted sessions. Other protocol revisions and legacy
+HTTP+SSE transports are unsupported; OAuth uses the explicit operator sign-in described
+in [mcp-authentication.md](mcp-authentication.md). Local stdio 2025-11-25 is
 available through [registered connection profiles](mcp-connections.md); use a compatible server
 rather than relaxing the checks. See the [stateless transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 and [2025 Streamable HTTP specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).

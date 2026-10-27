@@ -42,7 +42,7 @@ def stdio_profile(tmp_path, mode="normal", name="audit"):
         "arguments": [str(SERVER), mode, str(tmp_path / name)],
         "cwd": str(tmp_path),
         "environment": {"FIXTURE_SETTING": "configured"},
-        "credential_env": {},
+        "credentials": {},
     }
 
 
@@ -168,7 +168,7 @@ def test_minimal_environment_and_credentials(tmp_path):
     async def scenario():
         config = configured(tmp_path)
         profile = config["capabilities"]["connections"]["servers"]["first"]
-        profile["credential_env"] = {"FIXTURE_TOKEN": TOKEN_ENV}
+        profile["credentials"] = {"FIXTURE_TOKEN": {"source": "environment", "name": TOKEN_ENV}}
         with patch.dict(os.environ, {TOKEN_ENV: CANARY, "UNRELATED_SECRET": "do-not-inherit"}):
             caps = Capabilities(config, lambda _: None)
             await caps.connections.discover("first")
@@ -252,9 +252,12 @@ def test_http_manager_credentials_discovery_and_scoped_busy_session(tmp_path):
             config = config_for(server.origin, TOKEN_ENV)
             caps = Capabilities(config, lambda _: None)
             manager = caps.connections
+            with patch.dict(os.environ), pytest.raises(CapabilityError, match="unavailable"):
+                os.environ.pop(TOKEN_ENV, None)
+                await manager.discover("fixture")
             with (
                 patch.dict(os.environ, {TOKEN_ENV: ""}),
-                pytest.raises(CapabilityError, match="unavailable"),
+                pytest.raises(CapabilityError, match="empty"),
             ):
                 await manager.discover("fixture")
             with (
@@ -478,8 +481,8 @@ def test_stdio_credential_echo_is_absent_from_provider_public_reply_and_audit(tm
 
     async def scenario():
         config = configured(tmp_path, "credential_echo")
-        config["capabilities"]["connections"]["servers"]["first"]["credential_env"] = {
-            "FIXTURE_TOKEN": TOKEN_ENV
+        config["capabilities"]["connections"]["servers"]["first"]["credentials"] = {
+            "FIXTURE_TOKEN": {"source": "environment", "name": TOKEN_ENV}
         }
         logs, prompts = [], []
 
@@ -519,5 +522,22 @@ def test_dead_process_status_and_request_size_guard(tmp_path):
         async with manager.session("first", set()) as client:
             with pytest.raises(CapabilityError, match="request too large"):
                 await client.rpc("tools/call", {"payload": "x" * 525000}, 123)
+
+    asyncio.run(scenario())
+
+
+def test_launch_failure_before_any_process_cleans_up_and_reports_failed(tmp_path):
+    async def scenario():
+        config = configured(tmp_path)
+        profile = config["capabilities"]["connections"]["servers"]["first"]
+        profile["cwd"] = str(tmp_path / "missing-working-directory")
+        manager = Capabilities(config, lambda _: None, tmp_path).connections
+        with pytest.raises(OSError):
+            await manager.discover("first")
+        assert manager.status("first")["outcome"] == "failed"
+        assert manager._active == {} and manager._closing == {}
+        # The profile recovers once the operator fixes the directory.
+        (tmp_path / "missing-working-directory").mkdir()
+        assert (await manager.discover("first"))[0]["name"] == "read_example"
 
     asyncio.run(scenario())

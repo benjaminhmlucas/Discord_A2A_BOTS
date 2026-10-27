@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 import aiohttp
 from yarl import URL
 
+from bridge_errors import CapabilityError as CapabilityError
+
 V6_SPECIAL = tuple(
     ipaddress.IPv6Network(value)
     for value in (
@@ -21,10 +23,6 @@ V6_SPECIAL = tuple(
 )
 V4_SPECIAL = ipaddress.IPv4Network("192.0.0.0/24")
 V4_ANYCAST = {ipaddress.IPv4Address("192.0.0.9"), ipaddress.IPv4Address("192.0.0.10")}
-
-
-class CapabilityError(ValueError):
-    """Static messages only: request data, credentials and server errors stay private."""
 
 
 def public_address(value: str) -> bool:
@@ -103,6 +101,20 @@ class SafeHTTP:
         self.internal_origins = tuple(internal_origins)
         self.max_bytes, self.seconds, self.redirects = max_bytes, seconds, redirects
 
+    async def validate_browser_destination(self, destination: str) -> None:
+        """Apply DNS admission before handing an authorization URL to a browser.
+
+        The browser owns its subsequent resolution/redirects; this preflight cannot
+        pin its socket like open() does for bridge-owned HTTP requests.
+        """
+        url = checked_url(destination, self.internal_origins)
+        resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
+        try:
+            async with asyncio.timeout(self.seconds):
+                await resolver.resolve(str(url.host), url.port or 443, family=socket.AF_UNSPEC)
+        finally:
+            await resolver.close()
+
     @asynccontextmanager
     async def open(
         self,
@@ -111,7 +123,10 @@ class SafeHTTP:
         *,
         headers: Mapping[str, str] | None = None,
         body: object = None,
+        form: Mapping[str, str] | None = None,
     ) -> AsyncIterator[aiohttp.ClientResponse]:
+        if form is not None and body is not None:
+            raise CapabilityError("Ambiguous request body")
         url = checked_url(destination, self.internal_origins)
         resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
         connector = aiohttp.TCPConnector(resolver=resolver, use_dns_cache=False, force_close=True)
@@ -128,6 +143,7 @@ class SafeHTTP:
                     url,
                     headers={"Accept-Encoding": "identity", **(headers or {})},
                     json=body,
+                    data=form,
                     allow_redirects=False,
                 ) as response:
                     if response.headers.get("Content-Encoding", "identity").lower() != "identity":

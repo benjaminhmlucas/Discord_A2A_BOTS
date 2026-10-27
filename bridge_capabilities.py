@@ -6,16 +6,22 @@ import os
 import re
 from dataclasses import dataclass
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import aiohttp
 from yarl import URL
 
+from bridge_auth_policy import references
+from bridge_authentication import deployment_authentication
 from bridge_authorization import eligible_sender
 from bridge_http import CapabilityError, SafeHTTP, checked_url
 from bridge_memory import MemoryAccess, MemoryRequest
 from bridge_connections import Registry, ConnectionManager, NAME
 from bridge_mcp_schema import bounded, checked_schema, validate
+
+
+ROOT = Path(__file__).resolve().parent
 
 
 def require(condition: object) -> None:
@@ -30,7 +36,9 @@ class CapabilityRequest:
 
 
 class Capabilities:
-    def __init__(self, config: dict[str, Any], log: Callable[[str], None]) -> None:
+    def __init__(
+        self, config: dict[str, Any], log: Callable[[str], None], root: Path = ROOT
+    ) -> None:
         data = config.get("capabilities", {"enabled": False})
         require(isinstance(data, dict) and type(data.get("enabled")) is bool)
         require(
@@ -55,7 +63,8 @@ class Capabilities:
                 raise ValueError("Invalid capabilities configuration") from None
         self.http = SafeHTTP(internal_origins=internal)
         self.registry = Registry(data.get("connections", {"version": 1, "servers": {}}), self.http)
-        self.connections = ConnectionManager(self.registry)
+        self.authentication = deployment_authentication(config, root, self.http)
+        self.connections = ConnectionManager(self.registry, self.authentication)
         self.tools: dict[str, dict[str, Any]] = data.get("tools", {})
         require(isinstance(self.tools, dict) and len(self.tools) <= 32)
         for alias, tool in self.tools.items():
@@ -114,12 +123,30 @@ class Capabilities:
     def refresh_secrets(self) -> None:
         self.secrets.clear()
         self.secrets.update(self.memory.credentials())
+        # Synchronous baseline; available native values are read off-loop before dispatch.
         for profile in self.registry.export()["servers"].values():
-            refs = profile["credential_env"]
-            for name in refs.values() if isinstance(refs, dict) else [refs]:
-                value = os.environ.get(name) if name else None
-                if value:
+            for reference in references(profile).values():
+                value = os.environ.get(reference["name"])
+                if reference["source"] == "environment" and value:
                     self.secrets.add(value)
+
+    async def refresh_credentials(self) -> None:
+        """Snapshot configured credentials for argument/context DLP, without network calls."""
+        self.refresh_secrets()
+        slots = asyncio.Semaphore(4)
+
+        async def available(name: str, profile: dict[str, Any]) -> set[str]:
+            async with slots:
+                return await self.authentication.known_secrets(name, profile)
+
+        profiles = self.registry.export()["servers"]
+        snapshots = await asyncio.gather(
+            *(available(name, profile) for name, profile in profiles.items())
+        )
+        for values in snapshots:
+            # Retain this request's snapshot through later environment refreshes
+            # and token rotation, until the runtime's finally clears active_secrets.
+            self.active_secrets.update(values)
 
     def redact(self, text: str) -> str:
         for secret in sorted(self.secrets | self.active_secrets, key=len, reverse=True):
@@ -187,7 +214,7 @@ class Capabilities:
         outcome = "failed"
         try:
             self.active_secrets.clear()
-            self.refresh_secrets()
+            await self.refresh_credentials()
             if isinstance(request, MemoryRequest):
                 try:
                     credentials = tuple(self.secrets | self.active_secrets)
@@ -203,8 +230,14 @@ class Capabilities:
             # Check actual scalar values before JSON escaping can hide quotes/newlines.
             arguments = tuple(bounded(values))
             filtered = await asyncio.to_thread(privacy.filter_many, *arguments)
-            if arguments != filtered or any(self.redact(value) != value for value in arguments):
+
+            def check_credentials() -> None:
+                if any(self.redact(value) != value for value in arguments):
+                    raise CapabilityError("Private arguments denied")
+
+            if arguments != filtered:
                 raise CapabilityError("Private arguments denied")
+            check_credentials()
             async with asyncio.timeout(self.http.seconds):
                 if request.name == "web":
                     text = await self.http.page(request.arguments["url"])
@@ -213,7 +246,11 @@ class Capabilities:
                     # Revalidate the request snapshot before transport dispatch.
                     validate(request.arguments, tool["input_schema"])
                     text = await self.connections.call(
-                        tool["connection"], tool["name"], values, self.active_secrets
+                        tool["connection"],
+                        tool["name"],
+                        values,
+                        self.active_secrets,
+                        before_dispatch=check_credentials,
                     )
             text = await asyncio.to_thread(privacy.filter, self.redact(text))
             outcome = "completed"

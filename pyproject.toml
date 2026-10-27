@@ -12,7 +12,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["bridge_contracts.py", "bridge_health_io.py", "bridge_authorization.py", "bridge_http.py", "bridge_mcp.py", "bridge_capabilities.py", "bridge_privacy.py", "bridge_memory.py", "bridge_memory_io.py"]
+files = ["bridge_contracts.py", "bridge_health_io.py", "bridge_authorization.py", "bridge_errors.py", "bridge_http.py", "bridge_mcp.py", "bridge_capabilities.py", "bridge_privacy.py", "bridge_memory.py", "bridge_memory_io.py", "bridge_mcp_schema.py", "bridge_mcp_stdio.py", "bridge_connections.py", "bridge_credentials.py", "bridge_credential_host.py", "bridge_auth_policy.py", "bridge_authentication.py", "bridge_oauth_discovery.py", "bridge_oauth_flow.py", "bridge_oauth_grants.py", "mcp_connections.py"]
 strict = true
 
 [tool.bandit]

@@ -17,14 +17,20 @@ Inside the ignored `bridge_config.json`, `capabilities.connections` has this for
       "transport": "http",
       "endpoint": "https://mcp.example.com/mcp",
       "protocol": "2025-11-25",
-      "credential_env": "BOTBRIDGE_MCP_DOCS"
+      "authentication": {
+        "type": "bearer",
+        "credential": {"source": "native", "name": "docs-token"}
+      }
     }
   }
 }
 ```
 
-`credential_env: null` means no authentication. Existing bearer environment
-references still work; OAuth, custom headers and OS credential stores are #27.
+`authentication` is required: `{"type": "none"}`, a bearer reference, restricted
+custom headers or OAuth. Profiles hold credential **references**, never values; see
+[MCP authentication](mcp-authentication.md) for every mode, the native credential
+stores and the sign-in/rotation commands. Endpoint query parameters named like
+credentials (token, key, secret, signature, session, auth...) are rejected.
 Remote HTTP uses the existing HTTPS/address/DNS/redirect policy and explicit
 `internal_origins` exceptions. HTTP supports the configured 2025-11-25 or
 2026-07-28 protocol without silent downgrade.
@@ -38,9 +44,12 @@ Local connections instead contain these exact fields:
   "arguments": [],
   "cwd": "/absolute/path/to/working-directory",
   "environment": {"LANG": "en_US.UTF-8"},
-  "credential_env": {"SERVICE_TOKEN": "BOTBRIDGE_MCP_SERVICE"}
+  "credentials": {"SERVICE_TOKEN": {"source": "native", "name": "service-token"}}
 }
 ```
+
+`credentials` maps a child environment variable to a native or environment
+reference; only those resolved values reach the child.
 
 Use native absolute Windows paths on Windows (escaped backslashes in JSON).
 The command must be an executable, not a `.cmd`, `.bat`, `.ps1` or `.sh` launcher;
@@ -136,12 +145,18 @@ Use this checkout's Python interpreter; Windows examples:
 .venv\Scripts\python.exe mcp_connections.py --config bridge_config.json remove local-server --output proposed-config-3.json
 ```
 
-`status` reports this manager instance; a fresh CLI invocation has no connected
-sessions and does not probe existing bot processes. `test` performs initialization
+`status` reports this manager instance plus masked authentication state; a fresh
+CLI invocation has no connected sessions and does not probe existing bot processes.
+Credential and sign-in commands are documented in
+[MCP authentication](mcp-authentication.md). Before editing, renaming or removing
+a profile, use its original configuration to log out or delete its native
+credentials; offline exports do not revoke grants or clean up the old binding.
+Keep the original configuration until cleanup succeeds. `test` performs initialization
 and discovery, not a tool call. `discover` adds tool names only, not descriptions or
 schemas. Diagnostic sessions disconnect before returning; output reports
-`connected: false` and the completed/failed outcome. Future long-lived callers can
-explicitly connect/disconnect through the shared API. No GUI/browser opens.
+`connected: false` and the completed/failed/rejected outcome. Future long-lived
+callers can explicitly connect/disconnect through the shared API. Only the explicit
+`signin` command can open a browser.
 
 Edits validate the complete resulting bridge configuration and write only a **new**
 export, refusing to overwrite existing files. Omitted optional runtime defaults stay

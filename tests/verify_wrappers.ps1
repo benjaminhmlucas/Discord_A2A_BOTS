@@ -15,7 +15,7 @@ $branchNodes = $ast.FindAll({ param($node)
     $node -is [System.Management.Automation.Language.LoopStatementAst] -or
     $node -is [System.Management.Automation.Language.SwitchStatementAst] -or
     $node -is [System.Management.Automation.Language.TryStatementAst] -or
-    $node -is [System.Management.Automation.Language.TernaryExpressionAst]
+    $node.GetType().FullName -eq 'System.Management.Automation.Language.TernaryExpressionAst'
 }, $true)
 if ($branchNodes.Count -ne 0) { throw 'Setup decisions must remain in the branch-tested Python orchestrator' }
 $points = @()

@@ -15,7 +15,7 @@ from scripts.check_release import check_path
 
 ROOT = Path(__file__).resolve().parent.parent
 NODE = os.environ.get("BOTBRIDGE_TEST_NODE") or shutil.which("node")
-POWERSHELL = os.environ.get("BOTBRIDGE_TEST_POWERSHELL") or shutil.which("pwsh")
+POWERSHELL = os.environ.get("BOTBRIDGE_TEST_POWERSHELL") or shutil.which("powershell.exe")
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32",
     reason="Native Windows integration; portable logic is tested separately",
@@ -51,9 +51,13 @@ def command(args, root, env, expected=0):
     return result.stdout
 
 
-def test_fresh_install_and_start_success_and_failure_propagation(tmp_path):
+def require_windows_runtime():
     if not NODE or not POWERSHELL:
-        pytest.fail("Native setup verification requires Node and PowerShell 7")
+        pytest.fail("Native Windows verification requires Node and Windows PowerShell 5.1")
+
+
+def test_fresh_install_and_start_success_and_failure_propagation(tmp_path):
+    require_windows_runtime()
     root = tmp_path / "setup verification & isolated"
     root.mkdir()
     export_into(root)

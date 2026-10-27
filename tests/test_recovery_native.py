@@ -16,6 +16,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Real Windows re
 
 
 def test_actual_scheduled_recovery_and_preserved_stop(tmp_path):
+    native.require_windows_runtime()
     root = tmp_path / "scheduled recovery & isolated"
     root.mkdir()
     scripts = root / "scripts"

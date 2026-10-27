@@ -431,28 +431,13 @@ def test_actual_workflow_links_are_rejected(candidate, level):
         return
     linked.rename(target)
     if os.name == "nt":
+        # A real NTFS junction (reparse point) without symlink privilege. Created via the
+        # same API CPython's own tests use, instead of a Windows PowerShell cold start,
+        # which took ~10 seconds on hosted runners and timed out.
+        import _winapi
 
-        def quote(value):
-            return "'" + str(value).replace("'", "''") + "'"
-
-        subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "New-Item -ItemType Junction -Path "
-                + quote(linked)
-                + " -Target "
-                + quote(target)
-                + " | Out-Null",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        _winapi.CreateJunction(str(target), str(linked))
+        assert os.lstat(linked).st_file_attributes & 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
     else:
         linked.symlink_to(target, target_is_directory=target.is_dir())
     with pytest.raises(gate.PolicyError, match="linked_workflow_path"):
@@ -602,4 +587,49 @@ def test_every_unlisted_step_setting_is_rejected(candidate, key):
     data["jobs"]["quality"]["steps"][-1][key] = STEP_SETTINGS[key]
     save(candidate, data)
     with pytest.raises(gate.PolicyError, match="^unapproved_step_key$"):
+        gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize(
+    "fault,code",
+    [
+        ("macos_elsewhere", "untrusted_runner"),
+        ("macos_self_hosted", "untrusted_runner"),
+        ("linux_runner", "untrusted_runner"),
+        ("credential_matrix", "untrusted_job_matrix"),
+        ("missing_linux", "unexpected_ci_jobs"),
+        ("missing_macos", "unexpected_ci_jobs"),
+        ("credential_secret", "expression_in_execution"),
+        ("credential_condition", "step_execution"),
+    ],
+)
+def test_native_credential_jobs_cannot_be_widened(candidate, fault, code):
+    data = load(candidate)
+    jobs = data["jobs"]
+    if fault == "macos_elsewhere":
+        jobs["quality"]["runs-on"] = "macos-15"
+    elif fault == "macos_self_hosted":
+        jobs["credentials-macos"]["runs-on"] = "self-hosted"
+    elif fault == "linux_runner":
+        jobs["credentials-linux"]["runs-on"] = "macos-15"
+    elif fault == "credential_matrix":
+        jobs["credentials-linux"]["strategy"] = {"fail-fast": False, "matrix": {"os": ["x"]}}
+    elif fault in ("missing_linux", "missing_macos"):
+        jobs.pop("credentials-" + fault.split("_")[1])
+    elif fault == "credential_secret":
+        jobs["credentials-macos"]["steps"].append({"run": "echo ${{ secrets.KEYCHAIN }}"})
+    else:
+        jobs["credentials-linux"]["steps"][-1]["if"] = "always()"
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match=f"^{code}$"):
+        gate.validate_directory(candidate)
+
+
+@pytest.mark.parametrize("job", ["credentials-linux", "credentials-macos"])
+def test_native_credential_action_inputs_cannot_reference_secrets(candidate, job):
+    data = load(candidate)
+    python_step = data["jobs"][job]["steps"][1]
+    python_step["with"]["python-version"] = "${{ secrets.SYNTHETIC_CREDENTIAL }}"
+    save(candidate, data)
+    with pytest.raises(gate.PolicyError, match="^untrusted_expression$"):
         gate.validate_directory(candidate)

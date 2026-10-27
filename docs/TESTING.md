@@ -2,7 +2,7 @@
 
 Unit tests are required alongside integration tests. Unit tests exercise routing, authorization, privacy, state transitions, provider failures, cancellation, cleanup and setup failure propagation. Integration tests verify that the pieces work together through their actual consumers.
 
-Install `requirements-dev.txt` into a development venv and run the commands under README's Development checks. Python 3.11 and Node 24.15.0 are the tested runtimes. Native Windows tests additionally require PowerShell 7 and the `py -3.11` launcher. No Discord tokens or provider credentials are needed for tests.
+Install `requirements-dev.txt` into a development venv and run the commands under README's Development checks. Python 3.11 and Node 24.15.0 are the tested runtimes. Native Windows tests use the built-in Windows PowerShell 5.1 (`powershell.exe`) and the `py -3.11` launcher. No additional PowerShell installation, Discord tokens or provider credentials are needed for tests.
 
 ## Exact coverage gates
 
@@ -14,6 +14,10 @@ The Node command in README uses V8 coverage and requires 100% lines, branches an
 
 `test_prompt_injection.py` uses actual authorization, SQLite transactions and private-marker files; only Discord transport and model output are substitutes. `test_ci_injection.py` runs the real policy checker on hostile YAML and through its real CLI, without executing candidate workflow commands. Fixtures cover PR metadata/diffs/docs, quoted approvals, web content and MCP/tool results as untrusted text. These checks do not certify a live provider's sandbox or detect every malicious natural-language instruction; see [the AC/evidence map and limits](prompt-injection.md).
 
+## Native credential safety in pytest
+
+An autouse guard permits native adapter get/set/delete calls only for reserved `test`/`test-<hex>` namespaces or deployment namespaces registered from roots inside pytest basetemp. It also guards the Linux direct SDK entry point and records swallowed violations as test failures. It is active before collection and throughout local and native CI runs. Never run the suite from a live installation folder. This prevents accidental adapter misuse; it is not a sandbox for malicious test code.
+
 ## Windows integration
 
 `tests/test_native_setup.py` runs these checks automatically as part of pytest on Windows:
@@ -23,7 +27,7 @@ The Node command in README uses V8 coverage and requires 100% lines, branches an
 - Creates only its own temporary processes to verify the real Windows duplicate-process mutex and kill-on-close job behavior.
 - Creates sparse files representing more than 1 GB of active or archived logs, then verifies cleanup reaches the configured budget and preserves unrelated content. Sparse allocation avoids writing a gigabyte of payload to the drive.
 
-Optional test environment variables `BOTBRIDGE_TEST_NODE` and `BOTBRIDGE_TEST_POWERSHELL` select installed executables; otherwise PATH is used. `BOTBRIDGE_TEST_WHEELS` selects a predownloaded wheel directory. Without it, the native setup test downloads runtime wheels before testing offline installation. None of these values belong in tracked configuration.
+Optional test environment variables `BOTBRIDGE_TEST_NODE` and `BOTBRIDGE_TEST_POWERSHELL` select installed executables; otherwise PATH supplies Node and the built-in `powershell.exe`. Hosted Windows CI exercises the wrappers with that same default shell. `BOTBRIDGE_TEST_WHEELS` selects a predownloaded wheel directory. Without it, the native setup test downloads runtime wheels before testing offline installation. None of these values belong in tracked configuration.
 
 `tests/test_real_pm2.py` adds a real PM2 7.0.4 integration test. It installs actual npm packages, runs the real startup procedure and logrotate module in a path with spaces and `&`, checks two distinct daemon sockets and process lists, verifies exit 103 stops without restart, checks compressed rotation/retention and the real aggregate manager, then saves and resurrects the process list. Its bot consumers are temporary Python fixtures; they produce test logs without contacting Discord or AI. Both owned daemons are stopped during cleanup. The scoped preloader is verified before any daemon command.
 

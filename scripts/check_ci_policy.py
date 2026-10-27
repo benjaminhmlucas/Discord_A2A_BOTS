@@ -137,7 +137,11 @@ def validate_workflow(text, name):
         if key not in {"concurrency", "jobs"}:
             validate_expressions([key, value])
     jobs = workflow.get("jobs")
-    expected_jobs = {"analyze"} if name == "codeql.yml" else {"test", "quality"}
+    expected_jobs = (
+        {"analyze"}
+        if name == "codeql.yml"
+        else {"test", "quality", "credentials-linux", "credentials-macos"}
+    )
     require(isinstance(jobs, dict) and set(jobs) == expected_jobs, "unexpected_ci_jobs")
     for identity, job in jobs.items():
         require(isinstance(job, dict), "job_mapping_required")
@@ -147,9 +151,12 @@ def validate_workflow(text, name):
             permissions["security-events"] = "write"
         require(job.get("permissions", workflow["permissions"]) == permissions, "job_permissions")
         runner = job.get("runs-on")
-        expected_runner = "${{ matrix.os }}" if identity == "test" else "ubuntu-24.04"
+        # Only the isolated native credential job may use the pinned macOS image.
+        expected_runner = {"test": "${{ matrix.os }}", "credentials-macos": "macos-15"}.get(
+            identity, "ubuntu-24.04"
+        )
         require(runner == expected_runner, "untrusted_runner")
-        if identity == "quality":
+        if identity not in ("test", "analyze"):
             require("strategy" not in job, "untrusted_job_matrix")
         else:
             matrix = (

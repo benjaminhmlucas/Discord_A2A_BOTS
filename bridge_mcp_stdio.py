@@ -19,15 +19,11 @@ BASE_ENV = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL"}
 WINDOWS = os.name == "nt"
 
 
-def child_environment(profile: dict[str, Any], credentials: set[str]) -> dict[str, str]:
+def child_environment(profile: dict[str, Any], credentials: dict[str, str]) -> dict[str, str]:
+    """Credentials were resolved from this profile's approved references only."""
     env = {k: v for k, v in os.environ.items() if k.upper() in BASE_ENV}
     env.update(profile["environment"])
-    for key, reference in profile["credential_env"].items():
-        value = os.environ.get(reference)
-        if not value:
-            raise CapabilityError("MCP credential unavailable")
-        credentials.add(value)
-        env[key] = value
+    env.update(credentials)
     # Preserve only this explicit diagnostic switch and our own Node hiding preload.
     env["BOTBRIDGE_SHOW_CONSOLE"] = "1" if os.environ.get("BOTBRIDGE_SHOW_CONSOLE") == "1" else "0"
     env["NODE_OPTIONS"] = "--require=" + json.dumps(str(ROOT / "scripts/hidden_windows.cjs"))
@@ -36,9 +32,11 @@ def child_environment(profile: dict[str, Any], credentials: set[str]) -> dict[st
 
 
 class StdioClient(MCPClient):
-    def __init__(self, profile: dict[str, Any], credentials: set[str]) -> None:
-        super().__init__(SafeHTTP(), "", protocol=PROTOCOL_2025, secrets=credentials)
-        self.profile = profile
+    def __init__(
+        self, profile: dict[str, Any], credentials: dict[str, str], secrets: set[str]
+    ) -> None:
+        super().__init__(SafeHTTP(), "", protocol=PROTOCOL_2025, secrets=secrets)
+        self.profile, self.credentials = profile, credentials
         self.process: asyncio.subprocess.Process | None = None
         self.stderr_task: asyncio.Task[None] | None = None
 
@@ -55,7 +53,7 @@ class StdioClient(MCPClient):
             task.result()
 
     async def connect(self) -> None:
-        env = child_environment(self.profile, self.secrets)
+        env = child_environment(self.profile, self.credentials)
         self.process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-I",
