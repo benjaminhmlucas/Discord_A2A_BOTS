@@ -4,10 +4,12 @@ import asyncio
 import ipaddress
 import re
 import socket
+import ssl
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Mapping, Sequence
 
 import aiohttp
+import certifi
 from yarl import URL
 
 from bridge_errors import CapabilityError as CapabilityError
@@ -23,6 +25,17 @@ V6_SPECIAL = tuple(
 )
 V4_SPECIAL = ipaddress.IPv4Network("192.0.0.0/24")
 V4_ANYCAST = {ipaddress.IPv4Address("192.0.0.9"), ipaddress.IPv4Address("192.0.0.10")}
+
+
+def tls_context() -> ssl.SSLContext:
+    # OpenSSL cannot trigger Windows' on-demand root download, so system roots alone can reject
+    # valid public sites. Keep them for locally trusted CAs and add the pinned public bundle.
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
+
+
+TLS_CONTEXT = tls_context()
 
 
 def public_address(value: str) -> bool:
@@ -129,7 +142,9 @@ class SafeHTTP:
             raise CapabilityError("Ambiguous request body")
         url = checked_url(destination, self.internal_origins)
         resolver = GuardedResolver(str(url.origin()) in self.internal_origins)
-        connector = aiohttp.TCPConnector(resolver=resolver, use_dns_cache=False, force_close=True)
+        connector = aiohttp.TCPConnector(
+            resolver=resolver, use_dns_cache=False, force_close=True, ssl=TLS_CONTEXT
+        )
         try:
             async with aiohttp.ClientSession(
                 connector=connector,

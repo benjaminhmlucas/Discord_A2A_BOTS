@@ -2,12 +2,44 @@
 
 import asyncio
 import socket
+import ssl
 from unittest.mock import patch
 
+import aiohttp
 import pytest
 from aiohttp import web
 
-from bridge_http import CapabilityError, GuardedResolver, SafeHTTP, checked_url, public_address
+from bridge_http import (
+    TLS_CONTEXT,
+    CapabilityError,
+    GuardedResolver,
+    SafeHTTP,
+    checked_url,
+    public_address,
+    tls_context,
+)
+
+
+def test_tls_context_verifies_and_trusts_public_bundle_without_system_roots():
+    with patch.object(ssl.SSLContext, "load_default_certs"):
+        context = tls_context()
+    assert context.verify_mode is ssl.CERT_REQUIRED and context.check_hostname
+    assert context.cert_store_stats()["x509_ca"] > 0
+
+
+def test_requests_use_verifying_tls_context():
+    async def scenario():
+        with (
+            patch("bridge_http.aiohttp.TCPConnector", wraps=aiohttp.TCPConnector) as connector,
+            pytest.raises((aiohttp.ClientError, TimeoutError)),
+        ):
+            async with SafeHTTP(internal_origins=("http://127.0.0.1:9",), seconds=0.5).open(
+                "GET", "http://127.0.0.1:9/"
+            ):
+                pass
+        assert connector.call_args.kwargs["ssl"] is TLS_CONTEXT
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(
