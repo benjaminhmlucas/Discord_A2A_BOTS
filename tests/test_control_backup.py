@@ -91,13 +91,19 @@ def test_partial_write_failures_restore_previous_files(tmp_path):
     before = files(store)
     original = store.storage.atomic
 
+    writes = []
+
     def failing_second(name, data):
-        if name == "local_settings.json" and data != before[name]:
+        # Fail the forward write of the second file whatever its bytes: the restored
+        # settings can be byte-identical (LF on POSIX) or differ only in line endings.
+        writes.append(name)
+        if writes.count("local_settings.json") == 1 and name == "local_settings.json":
             raise OSError("synthetic disk failure")
         original(name, data)
 
     with patch.object(store.storage, "atomic", failing_second), pytest.raises(OSError):
         store.restore(bundle, store.snapshot()["revisions"])
+    assert writes[:2] == ["bridge_config.json", "local_settings.json"]
     assert files(store) == before
 
     def corrupt_last(name, data):

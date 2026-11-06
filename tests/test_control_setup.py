@@ -12,8 +12,10 @@ from aiohttp import web
 import pytest
 
 import bridge_control_setup as setup
+from bridge_credentials import CredentialStore
 from bridge_errors import CapabilityError
 from test_control_config import configured
+from test_runtime_credentials import Backend
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKEN = "synthetic-control-setup-token-51c2"
@@ -130,8 +132,11 @@ def test_checklist_fresh_clone_then_configured_steps(tmp_path):
 
 def test_native_selected_credentials_report_store_state(tmp_path):
     store = configured(tmp_path)
-    settings(store, runtime_credentials=["CODEXBOT_TOKEN"])
-    snapshot = store.snapshot()
+    # Selecting a native reference makes saves scan that store; keep it in memory so the
+    # test never depends on the host having a native credential service.
+    with patch.object(CredentialStore, "_backend", return_value=Backend()):
+        settings(store, runtime_credentials=["CODEXBOT_TOKEN"])
+        snapshot = store.snapshot()
 
     class Native:
         def __init__(self, config, root):
