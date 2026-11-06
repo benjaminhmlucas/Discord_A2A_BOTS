@@ -9,7 +9,8 @@ from pathlib import Path
 import aiohttp
 
 from bridge_contracts import ProviderError
-from bridge_settings import ROOT, local_path, local_settings, config_path
+from bridge_settings import ROOT, local_path, local_settings, config_path, read_identity_config
+from bridge_runtime_credentials import RuntimeCredentials, legacy, native_names
 import shutil
 from scripts.console_windows import creation_flags
 
@@ -22,19 +23,11 @@ MEMORY = str(local_path("memory_dir"))
 
 
 def secret(name):
-    value = os.environ.get(name)
-    if isinstance(value, str) and value.strip():
+    if name in native_names(_settings):
+        return RuntimeCredentials(read_identity_config(), ROOT).required(name)
+    value = legacy(name)
+    if value is not None:
         return value
-    if os.name == "nt":
-        import winreg
-
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-                value = winreg.QueryValueEx(key, name)[0]
-                if isinstance(value, str) and value.strip():
-                    return value
-        except OSError:
-            pass
     raise RuntimeError(f"Missing credential: {name}")
 
 

@@ -29,6 +29,7 @@ bridge_*.py                  Routing, providers, privacy, state and health check
 botbridge_*.py               Shared identity configuration and bounded logging
 log_manager.py              Combined log retention manager
 preflight.py                 Local readiness check, without Discord posts
+control_gui.py / ui/         Optional loopback control window (bridge_control_*.py)
 scripts/                     Setup, startup and publication checks
 tests/fixtures/              Fictional context and synthetic identities
 tests/                       Offline routing, privacy and setup tests
@@ -42,6 +43,14 @@ requirements-dev.txt         Pinned test and coverage tools
 ## Setup on your own Windows machine
 
 Use a new checkout, separate from any existing live installation. Python 3.11, Node.js and npm must be installed. Bots require their own Discord application identities and tokens. In the Discord Developer Portal, enable Message Content Intent for each bot, invite it to your server, and grant View Channel, Send Messages and Read Message History in the intended channel. Avoid giving bots Administrator permission.
+
+The steps below are the command-line path. After step 1 you can instead run the optional local control window, which walks through the same steps with a checklist and also manages credentials, MCP connections, services, recovery and backups:
+
+```powershell
+& .\.venv\Scripts\python.exe control_gui.py
+```
+
+It listens only on `127.0.0.1`, uses a one-time session secret, and writes the same ignored files through the same validators. Bots never depend on it. See [docs/local-control.md](docs/local-control.md) for each screen and its limits.
 
 1. Run `scripts/setup.ps1` to create a Python venv and install requirements. It does not start bots.
 2. Create local settings using your own IDs. The following prompts deliberately contain no example user values:

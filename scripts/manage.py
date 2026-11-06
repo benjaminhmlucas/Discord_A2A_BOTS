@@ -114,9 +114,12 @@ def run(command, root, env, timeout=120):
     return subprocess.CompletedProcess(command, code)
 
 
-def manage(action, root=ROOT, pm2_args=()):
+def manage(action, root=ROOT, pm2_args=(), console=None):
     root = Path(root).resolve()
     env = os.environ.copy()
+    if console is not None:
+        # An explicit choice for this command only; never persisted globally.
+        env["BOTBRIDGE_SHOW_CONSOLE"] = "1" if console else "0"
     env["PM2_HOME"] = str(root / ".pm2")
     env["NODE_OPTIONS"] = "--require=" + json.dumps(str(root / "scripts/pm2_namespace.cjs"))
     python = root / ".venv/Scripts/python.exe"

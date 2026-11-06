@@ -128,8 +128,8 @@ Mutating tools remain rejected and are separately tracked under #28.
 validated registry; it does not change a running connection. `ConnectionManager`
 provides `status`, `connect`, `disconnect`, request-scoped `session`, `discover` and
 `call`. The runtime authorizes the explicit alias before calling this trusted
-transport API. A future #24 UI must use the same validators and manager, not
-implement another transport or permission engine.
+transport API. The local control window (#24) uses the same validators and manager; it does
+not implement another transport or permission engine.
 Raw discovery definitions returned by the trusted API remain untrusted data;
 callers must filter credentials before displaying them. The CLI propagates selected
 credential/session values to its redactor and sanitizes names before serialization.
