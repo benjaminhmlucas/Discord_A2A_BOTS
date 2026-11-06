@@ -16,8 +16,12 @@ py -3.11 scripts/manage.py setup
 
 The window opens in your default browser. Use `--no-browser` to print the address
 instead, and `--root <folder>` to manage another installation folder. Stop it with
-Ctrl+C. Closing it disconnects any test MCP sessions it opened; bots, PM2 services and
-configured connections keep running.
+Ctrl+C. Closing it disconnects every MCP session it still owns, including one whose
+connect failed part way; bots, PM2 services and configured connections keep running.
+After a saved configuration change, the window switches to the new configuration only
+once no connection action is in progress and every connection the old one owns has
+been cleaned up. If that cleanup fails, the old configuration stays in use and the next
+action retries it.
 
 ## Security boundary
 
@@ -35,6 +39,9 @@ configured connections keep running.
   unavailable, and when the value was last verified.
 - Logs, redaction previews and exports pass through the same redaction as the
   runtime, including known values from the process and Windows User environment.
+  Log views read 64 KiB more than they show, starting at a complete line, and redact
+  all of it before cutting the displayed 32 KiB, so a value crossing the cut is never
+  shown in part.
 
 ## Screens
 
@@ -110,7 +117,11 @@ as one JSON file. Credentials are never included: they stay in the OS store or t
 environment, and `runtime_credentials` lists names only. Import validates the
 complete export with the runtime policy and refuses known credential values, then
 replaces all three files together. If a write fails, the files already replaced are
-restored.
+restored. Before the first replacement, the previous files are recorded in
+`.botbridge-memory/control-import.json`. If the process exits part way through, the
+next configuration read (the control window or a bot starting up) restores all three
+previous files and removes the record. A file edited by hand since the interruption
+is reported as a conflict and left as it is; resolve it, then delete the record.
 
 ## Runtime credential selection
 

@@ -14,6 +14,7 @@ import aiohttp
 from aiohttp import web
 import pytest
 
+import bridge_connections
 import bridge_control_connections
 from bridge_auth_policy import AuthenticationError
 from bridge_control_connections import ControlConnections
@@ -390,5 +391,106 @@ def test_rejected_bearer_on_stateful_connect_is_reported_without_the_value(tmp_p
             await manager.act("credential-delete", "bearer", {"reference": "fixture-bearer"})
             await manager.close()
             await runner.cleanup()
+
+    asyncio.run(scenario())
+
+
+class FaultyClient:
+    """Stands in for the stdio client inside the real shared ConnectionManager."""
+
+    process = None
+    instances = []
+    connected = None  # asyncio.Event released by the test, or None to fail at once.
+    cleanup_fails = True
+
+    def __init__(self, *args, **kwargs):
+        self.calls = 0
+        FaultyClient.instances.append(self)
+
+    async def connect(self):
+        if FaultyClient.connected is None:
+            raise OSError("synthetic handshake failure")
+        await FaultyClient.connected.wait()
+
+    async def disconnect(self):
+        self.calls += 1
+        if FaultyClient.cleanup_fails:
+            raise OSError("synthetic cleanup failure")
+
+
+def change_turns(store, turns):
+    snapshot = store.snapshot()
+    config = snapshot["config"]
+    config["max_turns"] = turns
+    store.save("bridge_config.json", config, snapshot["revisions"]["bridge_config.json"])
+
+
+def test_failed_connect_stays_owned_until_its_cleanup_succeeds(tmp_path):
+    store = configured(tmp_path)
+    save_capabilities(store, {"first": stdio_profile(tmp_path)})
+    FaultyClient.instances, FaultyClient.connected, FaultyClient.cleanup_fails = [], None, True
+
+    async def scenario():
+        manager = ControlConnections(store)
+        with patch.object(bridge_connections, "StdioClient", FaultyClient):
+            with pytest.raises(OSError, match="synthetic cleanup failure"):
+                await manager.act("connect", "first", {})
+        owner = manager.caps.connections
+        [client] = FaultyClient.instances
+        # Never held by the window, but still owned by the shared manager.
+        assert manager.held == {} and owner.owned() == ("first",) and client.calls == 1
+        with pytest.raises(CapabilityError, match="disconnect failed"):
+            await manager.close()
+        assert client.calls == 2 and owner.owned() == ("first",)
+        await asyncio.to_thread(change_turns, store, 5)
+        with pytest.raises(CapabilityError, match="disconnect failed"):
+            await manager.overview()
+        # The configuration change cannot discard the owner while cleanup keeps failing.
+        assert manager.caps.connections is owner and client.calls == 3
+        FaultyClient.cleanup_fails = False
+        view = await manager.overview()
+        assert manager.caps.connections is not owner and owner.owned() == ()
+        assert client.calls == 4
+        current = await asyncio.to_thread(store.snapshot)
+        assert view["revision"] == current["revisions"]["bridge_config.json"]
+        # An explicit disconnect also reaches a connection owned only by the manager.
+        with patch.object(bridge_connections, "StdioClient", FaultyClient):
+            FaultyClient.cleanup_fails = True
+            with pytest.raises(OSError, match="synthetic cleanup failure"):
+                await manager.act("connect", "first", {})
+            FaultyClient.cleanup_fails = False
+            await manager.act("disconnect", "first", {})
+        assert manager.caps.connections.owned() == ()
+
+    asyncio.run(scenario())
+
+
+def test_configuration_change_waits_for_an_in_flight_connect(tmp_path):
+    store = configured(tmp_path)
+    save_capabilities(store, {"first": stdio_profile(tmp_path)})
+    FaultyClient.instances, FaultyClient.cleanup_fails = [], False
+
+    async def scenario():
+        FaultyClient.connected = asyncio.Event()
+        manager = ControlConnections(store)
+        with patch.object(bridge_connections, "StdioClient", FaultyClient):
+            connecting = asyncio.create_task(manager.act("connect", "first", {}))
+            while not FaultyClient.instances:
+                await asyncio.sleep(0.01)
+            owner = manager.caps.connections
+            await asyncio.to_thread(change_turns, store, 5)
+            viewing = asyncio.create_task(manager.overview())
+            await asyncio.sleep(0.3)
+            # Replacement waits: the connecting client must not land in a discarded owner.
+            assert not viewing.done() and manager.caps.connections is owner
+            FaultyClient.connected.set()
+            assert (await connecting)["connected"] is True
+            view = await viewing
+        [client] = FaultyClient.instances
+        assert manager.caps.connections is not owner and owner.owned() == ()
+        assert client.calls == 1 and manager.held == {}
+        current = await asyncio.to_thread(store.snapshot)
+        assert view["revision"] == current["revisions"]["bridge_config.json"]
+        await manager.close()
 
     asyncio.run(scenario())

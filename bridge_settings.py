@@ -7,6 +7,17 @@ from typing import Any
 from collections.abc import Iterable
 
 ROOT = Path(__file__).resolve().parent
+# The local control window replaces these together; see bridge_control_journal.
+IMPORT_FILES = ("bridge_config.json", "local_settings.json", "public_context.md")
+IMPORT_JOURNAL = ".botbridge-memory/control-import.json"
+
+
+def recover_interrupted_import(root: str | Path = ROOT) -> None:
+    """Roll back a control-window import that a process exit left half applied."""
+    if (Path(root) / IMPORT_JOURNAL).exists():
+        from bridge_control_journal import recover
+
+        recover(Path(root))
 
 
 def config_path(root: str | Path = ROOT) -> Path:
@@ -16,6 +27,7 @@ def config_path(root: str | Path = ROOT) -> Path:
 
 
 def read_identity_config() -> Any:
+    recover_interrupted_import()
     path = config_path()
     if not path.is_file():
         raise RuntimeError(
@@ -27,6 +39,7 @@ def read_identity_config() -> Any:
 
 
 def local_settings() -> Any:
+    recover_interrupted_import()
     path = ROOT / "local_settings.json"
     if not path.is_file():
         path = ROOT / "local_settings.example.json"

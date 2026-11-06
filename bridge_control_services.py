@@ -20,6 +20,10 @@ from scripts.manage import manage
 SERVICES = ("codexbot", "antigravitybot", "claudebot", "botbridge-log-manager", "botbridge-health")
 TASK_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 LOG_BYTES = 32768
+# Read and redacted ahead of the displayed tail, so a credential or private value that
+# crosses the display boundary is matched whole and only cut after redaction. Far above
+# the largest storable credential (bridge_credentials.MAX_SECRET_BYTES).
+LOG_CONTEXT = 65536
 STATUS_FIELDS = ("name", "pid", "status", "restarts", "uptime")
 
 
@@ -81,12 +85,28 @@ def control(store, action, name, console=False):
 
 
 def tail(path):
+    """The end of a log, starting at a complete line, with LOG_CONTEXT extra bytes."""
     try:
         with Path(path).open("rb") as source:
-            source.seek(max(0, source.seek(0, os.SEEK_END) - LOG_BYTES))
-            return source.read(LOG_BYTES).decode("utf-8", "replace")
+            start = max(0, source.seek(0, os.SEEK_END) - LOG_BYTES - LOG_CONTEXT)
+            source.seek(start)
+            data = source.read(LOG_BYTES + LOG_CONTEXT)
     except OSError:
         return None
+    if start:
+        # The line cut by the read offset is dropped whole, never redacted in part.
+        cut = data.find(b"\n")
+        data = data[cut + 1 :] if cut >= 0 else b""
+    return data.decode("utf-8", "replace")
+
+
+def shown(text):
+    """The last LOG_BYTES characters of already-redacted text, from a line start."""
+    if len(text) <= LOG_BYTES:
+        return text
+    text = text[-LOG_BYTES:]
+    cut = text.find("\n")
+    return text[cut + 1 :] if cut >= 0 else text
 
 
 def logs(store, name):
@@ -100,8 +120,12 @@ def logs(store, name):
     else:
         raise CapabilityError("Unknown log")
     found = [text for text in map(tail, paths) if text is not None]
-    # Known credentials and private markers are redacted before the browser sees text.
-    return {"name": name, "text": store.redact("\n".join(found)) if found else None}
+    if not found:
+        return {"name": name, "text": None}
+    # Known credentials and private values are redacted over the whole window first;
+    # the displayed tail is cut from the redacted text, so no partial value survives.
+    redact = store.redactor()
+    return {"name": name, "text": "\n".join(shown(redact(text)) for text in found)}
 
 
 def age(path):

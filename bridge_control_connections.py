@@ -6,6 +6,7 @@ secret store. Discovery, connection and sign-in never add, enable or authorize t
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import copy
 import webbrowser
 
@@ -41,32 +42,65 @@ class ControlConnections:
         self.revision = None
         self.held = {}
         self.locks = {}
+        # Actions using the current Capabilities; a new configuration replaces it only
+        # when none are in flight and everything the old manager owns is cleaned up.
+        self.users = 0
+        self.changing = asyncio.Condition()
 
-    async def current(self):
-        snapshot = await asyncio.to_thread(self.store.snapshot)
-        revision = snapshot["revisions"]["bridge_config.json"]
-        if revision != self.revision:
-            # Never orphan a connection owned by the previous configuration.
-            await self.close()
-            self.caps = Capabilities(snapshot["config"], lambda _: None, self.store.root)
-            self.revision = revision
-        return self.caps
+    @asynccontextmanager
+    async def using(self):
+        async with self.changing:
+            while True:
+                # Read inside the lock so a stale snapshot can never replace a newer one.
+                snapshot = await asyncio.to_thread(self.store.snapshot)
+                revision = snapshot["revisions"]["bridge_config.json"]
+                if revision == self.revision:
+                    break
+                if self.users == 0:
+                    # Never orphan a connection owned by the previous configuration.
+                    await self.cleanup()
+                    self.caps = Capabilities(snapshot["config"], lambda _: None, self.store.root)
+                    self.revision = revision
+                    break
+                await self.changing.wait()
+            self.users += 1
+            caps = self.caps
+        try:
+            yield caps
+        finally:
+            async with self.changing:
+                self.users -= 1
+                self.changing.notify_all()
 
     def lock(self, name):
         return self.locks.setdefault(name, asyncio.Lock())
 
     async def release(self, name):
-        if name in self.held:
-            await self.caps.connections.disconnect(name)
-            del self.held[name]
+        manager = self.caps.connections
+        # Includes a client kept by a connect whose setup and cleanup both failed.
+        if name in self.held or name in manager.owned():
+            await manager.disconnect(name)
+        self.held.pop(name, None)
 
-    async def close(self):
+    async def cleanup(self):
+        if self.caps is None:
+            return
+        manager = self.caps.connections
+        # Everything the manager still owns, not only connections held open by this window:
+        # a failed connect or discovery keeps its client when its own cleanup failed.
         await asyncio.gather(
-            *(self.release(name) for name in list(self.held)), return_exceptions=True
+            *(manager.disconnect(name) for name in manager.owned()), return_exceptions=True
         )
-        if self.held:
+        owned = manager.owned()
+        self.held = {name: client for name, client in self.held.items() if name in owned}
+        if owned:
             # The manager retains ownership; a later attempt retries the same cleanup.
             raise CapabilityError("MCP disconnect failed; retry before changing connections")
+
+    async def close(self):
+        async with self.changing:
+            await self.changing.wait_for(lambda: self.users == 0)
+            await self.cleanup()
 
     async def status(self, caps, name):
         profile = caps.registry.profile(name)
@@ -75,7 +109,10 @@ class ControlConnections:
         return result
 
     async def overview(self):
-        caps = await self.current()
+        async with self.using() as caps:
+            return await self.listing(caps)
+
+    async def listing(self, caps):
         servers = []
         for name, profile in caps.registry.export()["servers"].items():
             row = await self.status(caps, name)
@@ -104,8 +141,7 @@ class ControlConnections:
             "protocols": [PROTOCOL, PROTOCOL_2025],
         }
 
-    async def change(self, action, name, profile, revision):
-        caps = await self.current()
+    async def change(self, caps, action, name, profile, revision):
         if action == "remove" and any(t["connection"] == name for t in caps.tools.values()):
             raise CapabilityError("Remove the tools that use this connection first")
         registry = caps.registry.changed(action, name, profile)
@@ -118,9 +154,14 @@ class ControlConnections:
         return {"revision": saved, "restart_required": True}
 
     async def act(self, action, name, data):
-        if action in ("add", "edit", "remove"):
-            return await self.change(action, name, data.get("profile"), data["revision"])
-        caps = await self.current()
+        # Counted as in use, so a configuration change cannot replace these Capabilities
+        # (and their connection owner) while this action is still connecting or cleaning up.
+        async with self.using() as caps:
+            if action in ("add", "edit", "remove"):
+                return await self.change(caps, action, name, data.get("profile"), data["revision"])
+            return await self.perform(caps, action, name, data)
+
+    async def perform(self, caps, action, name, data):
         profile = caps.registry.profile(name)
         auth = caps.authentication
         async with self.lock(name):

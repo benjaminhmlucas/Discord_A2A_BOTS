@@ -1,8 +1,12 @@
 """Non-secret export/import through the real validator, storage guards and GUI routes."""
 
 import asyncio
+import base64
 import copy
 import json
+from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import patch
 
 import aiohttp
@@ -10,9 +14,16 @@ from aiohttp import web
 import pytest
 
 import bridge_control_config
-from bridge_control_config import EXPORT_FORMAT
+import bridge_control_journal
+import bridge_settings
+from bridge_control_config import EXPORT_FORMAT, ControlConfig
+from bridge_control_journal import FILE_LIMIT
+from bridge_errors import CapabilityError
+from bridge_settings import IMPORT_JOURNAL
 from control_gui import STATE, create_app
 from test_control_config import configured
+
+ROOT = Path(__file__).resolve().parent.parent
 
 SECRET = "synthetic-control-export-secret-c93d"
 OWNER = 9007199254740993
@@ -103,8 +114,9 @@ def test_partial_write_failures_restore_previous_files(tmp_path):
 
     with patch.object(store.storage, "atomic", failing_second), pytest.raises(OSError):
         store.restore(bundle, store.snapshot()["revisions"])
-    assert writes[:2] == ["bridge_config.json", "local_settings.json"]
-    assert files(store) == before
+    # The durable import record is written before the first configuration file.
+    assert writes[:3] == [IMPORT_JOURNAL, "bridge_config.json", "local_settings.json"]
+    assert files(store) == before and not store.journal.pending()
 
     def corrupt_last(name, data):
         original(
@@ -173,3 +185,118 @@ def test_export_and_import_routes_keep_ids_exact(tmp_path):
     asyncio.run(scenario())
     current = store.snapshot()["config"]
     assert current["owner_id"] == OWNER and current["max_turns"] == 5
+
+
+CRASH = """
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from bridge_control_config import ControlConfig
+ControlConfig.known_secrets = lambda *args: ()
+store = ControlConfig(sys.argv[2])
+bundle = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+original, writes = store.storage.atomic, []
+def crash(name, data):
+    original(name, data)
+    writes.append(name)
+    if len(writes) == int(sys.argv[4]):
+        os._exit(73)  # Abrupt exit: no exception handler or rollback runs.
+store.storage.atomic = crash
+store.restore(bundle, store.snapshot()["revisions"])
+"""
+
+
+def mixed_root_bundle(store, tmp_path):
+    """A valid import whose files are only consistent together (shared memory root)."""
+    bundle = store.export()
+    root = tmp_path / "new-private-memory"
+    root.mkdir()
+    bundle["bridge_config.json"]["memory"] = {
+        "enabled": True,
+        "root": str(root),
+        "files": {},
+        "user_ids": [OWNER],
+        "bot_ids": [101],
+        "credential_env": [],
+    }
+    bundle["local_settings.json"]["memory_dir"] = str(root)
+    bundle["public_context.md"] = "Imported context\n"
+    store.validate(bundle["bridge_config.json"], bundle["local_settings.json"])
+    return bundle
+
+
+# Exit after the import record, then after each of the three configuration files.
+@pytest.mark.parametrize("writes", [1, 2, 3, 4])
+@pytest.mark.parametrize("reader", ["control", "bot"])
+def test_import_interrupted_by_process_exit_is_rolled_back_before_reads(tmp_path, writes, reader):
+    with patch.object(ControlConfig, "known_secrets", return_value=()):
+        store = prepared(tmp_path)
+        before = files(store)
+        payload = tmp_path / "payload.json"
+        payload.write_text(json.dumps(mixed_root_bundle(store, tmp_path)), encoding="utf-8")
+        child = subprocess.run(
+            [sys.executable, "-c", CRASH, str(ROOT), str(tmp_path), str(payload), str(writes)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert child.returncode == 73, child.stderr
+        assert (tmp_path / IMPORT_JOURNAL).is_file()
+        if reader == "control":
+            # A new window (or any configuration read) restores the previous files first.
+            snapshot = ControlConfig(tmp_path).snapshot()
+            assert snapshot["config"]["owner_id"] == OWNER
+        else:
+            # Bot startup recovers before it reads its identity or local settings.
+            bridge_settings.recover_interrupted_import(tmp_path)
+        assert files(store) == before and not store.journal.pending()
+        assert bridge_control_journal.recover(tmp_path) is False
+
+
+def test_import_recovery_conflicts_and_damaged_records_fail_closed(tmp_path):
+    with patch.object(ControlConfig, "known_secrets", return_value=()):
+        store = prepared(tmp_path)
+        before = files(store)
+        after = {**before, "public_context.md": b"Imported\n"}
+        with store.locked():
+            store.journal.begin(before, after)
+        (tmp_path / "public_context.md").write_bytes(b"Edited by hand\n")
+        with pytest.raises(CapabilityError, match="later edit of public_context.md"):
+            store.snapshot()
+        assert store.journal.pending()
+        assert (tmp_path / "public_context.md").read_bytes() == b"Edited by hand\n"
+
+        path = tmp_path / IMPORT_JOURNAL
+        record = json.loads(path.read_text(encoding="utf-8"))
+        oversized = base64.b64encode(b"x" * (FILE_LIMIT + 1)).decode()
+        for damaged in (
+            "not json",
+            "[]",
+            json.dumps({**record, "format": "other"}),
+            json.dumps({**record, "next": {}}),
+            json.dumps({**record, "previous": {**record["previous"], "public_context.md": "!"}}),
+            json.dumps(
+                {**record, "previous": {**record["previous"], "public_context.md": oversized}}
+            ),
+            json.dumps({**record, "next": {**record["next"], "public_context.md": 7}}),
+        ):
+            path.write_text(damaged, encoding="utf-8")
+            with pytest.raises(CapabilityError, match="unreadable"):
+                store.snapshot()
+
+        # The new version of a file is accepted, but a rollback that does not read back
+        # exactly keeps the record for the next attempt.
+        path.write_text(json.dumps(record), encoding="utf-8")
+        (tmp_path / "public_context.md").write_bytes(b"Imported\n")
+        original = store.storage.atomic
+        with (
+            patch.object(store.storage, "atomic", lambda name, data: original(name, data + b"!")),
+            pytest.raises(CapabilityError, match="verification failed"),
+        ):
+            store.snapshot()
+        assert store.journal.pending()
+        (tmp_path / "public_context.md").write_bytes(b"Imported\n")
+        # A reader already holding the configuration lock recovers without retaking it.
+        with store.locked():
+            assert store.snapshot()["context"] == before["public_context.md"].decode()
+        assert files(store) == before and not store.journal.pending()

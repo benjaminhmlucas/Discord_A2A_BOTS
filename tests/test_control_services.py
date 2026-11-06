@@ -133,6 +133,46 @@ def test_logs_are_bounded_and_redacted(tmp_path):
         services.logs(store, "../../secrets")
 
 
+BOUNDARY = "synthetic-boundary-credential-" + "q" * 40
+
+
+def fragments(text, value):
+    return [value[i:] for i in range(1, len(value) - 6)] + [value[:i] for i in range(7, len(value))]
+
+
+@pytest.mark.parametrize("earlier", [0, 200000])
+def test_log_tail_never_shows_part_of_a_value_crossing_the_cut(tmp_path, earlier):
+    store = configured(tmp_path)
+    path = store.root / ".pm2/logs/codexbot-out.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # The displayed tail starts 20 characters before the end of the credential's line.
+    padding = b"x" * (services.LOG_BYTES - 21)
+    path.write_bytes(b"y\n" * (earlier // 2) + BOUNDARY.encode() + b"\n" + padding)
+    with patch(
+        "bridge_control_config.legacy",
+        lambda name: BOUNDARY if name == "CODEXBOT_TOKEN" else None,
+    ):
+        assert store.redact(BOUNDARY) == "[private]"
+        text = services.logs(store, "codexbot")["text"]
+    # Redacted over the whole window first, so the cut lands outside the placeholder.
+    assert text.endswith("[private]\n" + padding.decode())
+    assert not any(part in text for part in fragments(text, BOUNDARY))
+
+
+def test_log_lines_cut_by_the_read_window_are_dropped_whole(tmp_path):
+    store = configured(tmp_path)
+    logs = store.root / ".pm2/logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    window = services.LOG_BYTES + services.LOG_CONTEXT
+    # One line longer than the whole read window: its visible part is never returned.
+    (logs / "codexbot-out.log").write_bytes(BOUNDARY.encode() + b"z" * window)
+    # A single redacted line longer than the display is cut from its end.
+    (logs / "codexbot-error.log").write_bytes(b"w" * (services.LOG_BYTES + 10))
+    with patch("bridge_control_config.legacy", lambda name: None):
+        text = services.logs(store, "codexbot")["text"]
+    assert text == "\n" + "w" * services.LOG_BYTES
+
+
 def test_health_recovery_and_maintenance(tmp_path):
     fresh = tmp_path / "fresh"
     fresh.mkdir()
