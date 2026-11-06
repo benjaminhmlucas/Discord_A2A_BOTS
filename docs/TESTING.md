@@ -45,6 +45,10 @@ The native tests are skipped on Linux. The GitHub Actions matrix uses Ubuntu 24.
 
 Run `python -m pytest tests/test_live_providers.py -q`. It calls each real backend through the shipped provider implementation using a temporary public-only checkout and checks the exact response. It uses account capacity or credits. It sends no Discord messages and does not use private memory. Keep these opt-in account tests out of public CI.
 
+## Local control window
+
+The `test_control_*.py` files exercise the optional window through its real aiohttp routes, the real configuration validators, storage guards and the shared MCP manager and authentication API. Connection tests run real stdio and loopback HTTP MCP servers; OAuth sign-in uses a loopback authorization server and, on Windows, the real native credential store inside pytest basetemp. Setup and diagnostics tests call a loopback fake for Discord and Gemini and patch the legacy environment reader, so real User-environment credentials are never read. Service tests replace the PM2 status entry with a local script; no test starts PM2 or bots. Backup tests inject partial write failures and a concurrent edit to verify all-or-nothing restore. `ui/control.js` has no DOM-level automated tests yet; check screens manually in an isolated demo checkout with synthetic IDs.
+
 ## Boundaries
 
 The default suite simulates Discord destinations and AI replies. A deterministic setup adapter remains useful for command failure injection, while the separate real PM2 test verifies actual integration. Private opt-in tests cover real provider authentication and replies. Discord gateway delivery, reconnect behavior, real mentions/references and a live bounded discussion remain separate deployment acceptance checks; passing mocks or provider calls alone cannot establish those results.

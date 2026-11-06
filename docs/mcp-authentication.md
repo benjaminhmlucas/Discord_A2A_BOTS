@@ -195,7 +195,7 @@ read cannot be included in the redaction snapshot.
 ## Shared API
 
 `bridge_authentication.Authentication` is the single API for the runtime, the CLI
-and the future GUI (#24): `headers`, `environment`, `set_credential`,
+and the local control window (#24): `headers`, `environment`, `set_credential`,
 `delete_credential`, `signin` (the caller supplies the browser opener), `logout`,
 `rejected` and masked `status`. `ConnectionManager` resolves credentials through it
 for each request; nothing else reads credential stores.
@@ -209,6 +209,6 @@ for each request; nothing else reads credential stores.
 | 3: refresh, revocation, concurrency, logout | `test_oauth_grants.py` and `test_auth_races_regression.py`: rotation, 401 recovery, concurrent refresh, cancellation, native cleanup failure, logout/late-refresh and stale-401/new-sign-in races. |
 | 4: no secret disclosure | Canary checks cover CLI, statuses, SQLite, configuration exports, tool arguments, original/public provider context and public replies. `test_credential_dispatch_guard.py` covers a transient native snapshot read failure before actual credential resolution. |
 | 5: native stores | Real Windows Credential Manager in the normal Windows job; real macOS Keychain and Linux Secret Service in the isolated `credentials-macos`/`credentials-linux` jobs with disposable stores. Every adapter also runs on every host through its OS API boundary (`test_credential_adapters.py`). Unavailable stores never fall back. |
-| 6: one API, no GUI needed | CLI and runtime use `Authentication`; the same API is available to the future GUI. Credentials never change tool/user/bot policy. `test_cli_secret_input.py` verifies hidden input fails before echoed fallback. |
+| 6: one API, no GUI needed | CLI and runtime use `Authentication`; the local control window uses the same API. Credentials never change tool/user/bot policy. `test_cli_secret_input.py` verifies hidden input fails before echoed fallback. |
 | 7: real boundaries | Core authentication, storage, leases and HTTP admission run unchanged against controlled peers. OS/DNS/browser/input faults and CLI error-reporting injection are identified in tests. Exact 100% statement/branch coverage remains required. |
 | 8: documentation | This guide plus [MCP connections](mcp-connections.md) and [security review](security-review.md). |

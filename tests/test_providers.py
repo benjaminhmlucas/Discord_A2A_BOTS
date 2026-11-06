@@ -8,11 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import bridge_providers as providers
+import bridge_runtime_credentials as runtime_credentials
 
 
 def test_secret_sources_and_missing():
     with patch.object(
-        providers, "os", SimpleNamespace(name="posix", environ={"SYNTHETIC": "fixture"})
+        runtime_credentials, "os", SimpleNamespace(name="posix", environ={"SYNTHETIC": "fixture"})
     ):
         assert providers.secret("SYNTHETIC") == "fixture"
         with pytest.raises(RuntimeError, match="Missing credential"):
@@ -21,7 +22,7 @@ def test_secret_sources_and_missing():
     registry.QueryValueEx.return_value = ("registry-fixture", 1)
     with (
         patch.dict(sys.modules, winreg=registry),
-        patch.object(providers, "os", SimpleNamespace(name="nt", environ={})),
+        patch.object(runtime_credentials, "os", SimpleNamespace(name="nt", environ={})),
     ):
         assert providers.secret("SYNTHETIC") == "registry-fixture"
         registry.OpenKey.side_effect = OSError("unavailable")
@@ -66,7 +67,9 @@ def test_blank_or_non_string_credentials_fail_closed(value):
     registry.QueryValueEx.return_value = (value, 1)
     with (
         patch.dict(sys.modules, winreg=registry),
-        patch.object(providers, "os", SimpleNamespace(name="nt", environ={"SYNTHETIC": " "})),
+        patch.object(
+            runtime_credentials, "os", SimpleNamespace(name="nt", environ={"SYNTHETIC": " "})
+        ),
     ):
         with pytest.raises(RuntimeError, match="Missing credential"):
             providers.secret("SYNTHETIC")
