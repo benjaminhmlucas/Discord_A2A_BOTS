@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRIVATE_DIRS = {
     ".pm2",
+    ".botbridge-memory",
     "private_memory",
     "openclaw_memory",
     "runtime_state",

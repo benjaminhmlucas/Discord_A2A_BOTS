@@ -16,7 +16,7 @@ Nested arguments use a bounded JSON Schema subset, with unsupported references,
 regular expressions and executable extensions denied. Both local and server schemas
 are enforced before dispatch; raw nested leaves/keys are privacy-checked before
 escaping. Stderr is privately drained and bounded, never copied into Discord errors.
-No UI (#24), mutating tools (#28) or full native installation portability (#25) is
+No mutating tools (#28) or full native installation portability (#25) is
 claimed here. See [mcp-connections.md](mcp-connections.md) for limits, shared API,
 verification boundaries and per-server acceptance.
 
@@ -80,7 +80,12 @@ configured Discord code is not yet fully typed. Bandit blocks all medium/high fi
 rule or vulnerability exclusions. Its remaining low-severity findings identify
 subprocess imports and calls: commands use argument arrays, never user text as shell
 syntax; tree termination addresses owned PIDs. Review these findings when process
-code changes. Dependency audits cover the installed Python development/runtime
+code changes. The optional control window adds subprocess findings for PM2, npm,
+preflight and provider status commands; all use fixed argument arrays and run only
+on an explicit button press. Its recovery-task removal and status checks pass the
+task name to PowerShell `-Command` only after restricting it to 1-64 characters of
+`[A-Za-z0-9_-]`. See [local-control.md](local-control.md) for its loopback,
+session-secret and error-message boundaries. Dependency audits cover the installed Python development/runtime
 environment and both locked PM2/logrotate graphs, failing on any known advisory.
 
 PM2's namespace adapter patches the internal `God.getMonitorData` method for

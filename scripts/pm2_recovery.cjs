@@ -67,6 +67,22 @@ async function recover(root, apps, pm2) {
   }
 }
 
+// Read-only operator view: never starts a daemon and returns identities/status only,
+// not the process environment PM2 keeps for each service.
+async function status(pm2, apps) {
+  const alive = await call(done => pm2.Client.pingDaemon(value => done(null, value)));
+  if (!alive) return {daemon: false, services: []};
+  await call(done => pm2.connect(done));
+  try {
+    const rows = await call(done => pm2.Client.executeRemote('getMonitorData', {botbridge_metadata_only: true}, done));
+    return {daemon: true, services: rows.filter(row => apps.some(app => app.name === row.name)).map(row => ({
+      name: row.name, pid: row.pid, status: row.pm2_env.status,
+      restarts: row.pm2_env.restart_time, uptime: row.pm2_env.pm_uptime}))};
+  } finally {
+    pm2.disconnect();
+  }
+}
+
 function record(root, report) {
   const home = path.join(root, '.pm2');
   fs.mkdirSync(home, {recursive: true});
@@ -115,4 +131,4 @@ async function main(root, pm2, apps) {
   return ['error', 'degraded'].includes(report.status) ? 1 : 0;
 }
 
-module.exports = {call, validateDump, recover, record, main};
+module.exports = {call, validateDump, recover, status, record, main};

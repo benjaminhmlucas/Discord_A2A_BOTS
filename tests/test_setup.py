@@ -94,10 +94,13 @@ class SetupTests(unittest.TestCase):
             root = Path(temp)
             (root / "private_memory").mkdir()
             (root / "private_memory/note.md").write_text("private fixture")
+            # The control window's lock and interrupted-import record (local file copies).
+            (root / ".botbridge-memory").mkdir()
+            (root / ".botbridge-memory/control-import.json").write_text("{}")
             (root / "bad.txt").write_text("sk-ant-" + "x" * 32)
             count, failures = release.scan(root)
-            self.assertEqual(count, 2)
-            self.assertEqual(len(failures), 2)
+            self.assertEqual(count, 3)
+            self.assertEqual(len(failures), 3)
             self.assertTrue(any(reason == "credential-like content" for _, reason in failures))
 
     def test_logrotate_patch_idempotent_and_version_checked(self):

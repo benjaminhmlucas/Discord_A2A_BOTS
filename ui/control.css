@@ -1,0 +1,48 @@
+* { box-sizing: border-box; }
+:root { font-family: Inter, "Segoe UI", sans-serif; color: #172c33; background: #f4f7f6; }
+body { margin: 0; display: grid; grid-template-columns: 245px 1fr; min-height: 100vh; }
+aside { background: #112f35; color: #e3edeb; padding: 32px 22px; display: flex; flex-direction: column; }
+.brand { font-size: 21px; font-weight: 650; display: flex; gap: 12px; align-items: center; }
+.mark { background: #b8e9a1; color: #112f35; border-radius: 9px; padding: 7px 12px; }
+.local { color: #9ab6b8; font-size: 11px; letter-spacing: 2px; margin: 43px 10px 15px; }
+nav { display: grid; gap: 5px; }
+button { cursor: pointer; font: inherit; border: 0; border-radius: 8px; padding: 12px 18px; background: #176b57; color: white; }
+nav button { background: transparent; color: #bdd0d0; text-align: left; padding: 12px; }
+nav button[aria-current="page"] { color: #112f35; background: #b8e9a1; font-weight: 600; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #70aef0; outline-offset: 3px; }
+.foot { font-size: 12px; color: #9ab6b8; margin-top: auto; padding-top: 35px; }
+main { padding: 35px 7%; max-width: 1280px; width: 100%; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 38px; }
+.eyebrow { font-size: 11px; letter-spacing: 2px; color: #557375; font-weight: 600; }
+.badge { border: 1px solid #c7d8d2; border-radius: 20px; padding: 7px 13px; font-size: 12px; color: #3b6f58; }
+h1 { font-size: 36px; letter-spacing: -1px; margin: 0 0 12px; }
+#description { color: #61767a; max-width: 700px; line-height: 1.6; margin-bottom: 28px; }
+.card { background: white; border: 1px solid #dce5e1; border-radius: 14px; padding: 26px; margin-bottom: 20px; }
+h2 { font-size: 18px; margin-top: 0; }
+label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+input, textarea { background: #fbfdfc; color: #172c33; border: 1px solid #c7d5cf; border-radius: 7px; padding: 12px; width: 100%; font: inherit; margin-bottom: 20px; }
+textarea { min-height: 320px; font-family: Consolas, monospace; font-size: 13px; line-height: 1.6; resize: vertical; }
+.actions { display: flex; gap: 12px; align-items: center; }
+.secondary { background: #e9f0ed; color: #24443b; }
+.help { color: #637779; font-size: 13px; line-height: 1.7; }
+#notice { margin: 18px 0; line-height: 1.6; }
+#notice.error { color: #9b2f29; }
+.result { white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px; background: #eef5ef; border-radius: 8px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.toggle { width: 22px; height: 22px; margin: 0 0 20px; accent-color: #176b57; }
+.card a { display: inline-block; color: #176b57; margin: 8px 22px 0 0; }
+.pill { display: inline-block; border-radius: 12px; padding: 3px 10px; font-size: 12px; font-weight: 600; background: #eef2f1; color: #44595c; margin: 0 4px; }
+.pill.good { background: #dff3d6; color: #1f5e2a; }
+.pill.bad { background: #fbe3df; color: #8a2a22; }
+.steps { list-style: none; padding: 0; margin: 0; }
+.steps li { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid #edf2f0; }
+.steps li button { padding: 7px 12px; }
+.step { min-width: 220px; font-weight: 600; }
+code { background: #f1f5f3; border-radius: 6px; padding: 4px 8px; font-family: Consolas, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
+select { font: inherit; padding: 10px; border: 1px solid #c7d5cf; border-radius: 7px; background: #fbfdfc; color: #172c33; margin: 0 12px 20px 0; }
+details { margin-top: 18px; }
+summary { cursor: pointer; color: #176b57; font-weight: 600; margin-bottom: 14px; }
+textarea.short { min-height: 170px; }
+.actions { flex-wrap: wrap; margin-bottom: 14px; }
+.log { max-height: 420px; overflow: auto; font-family: Consolas, monospace; font-size: 12.5px; margin-top: 14px; }
+@media (max-width: 760px) { body { grid-template-columns: 1fr; } aside { padding: 18px; } nav { grid-template-columns: repeat(2,1fr); } .local,.foot { display: none; } main { padding: 25px; } header { margin-bottom: 25px; } .row { display: block; } }

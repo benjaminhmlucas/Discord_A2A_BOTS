@@ -19,6 +19,8 @@ SESSION_LOG.md
 private_memory/
 openclaw_memory/
 runtime_state/
+# Storage lock and interrupted-import record (copies of the local files above)
+.botbridge-memory/
 chat_runtime/
 .pm2/
 logs/

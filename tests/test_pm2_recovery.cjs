@@ -208,7 +208,7 @@ test('CLI sets scoped home and loader and exits on result, rejection and hard de
     let timeout;
     const root = path.resolve(path.dirname(entry), '..');
     const context = {__dirname: path.dirname(entry),
-      process: {env, execPath: 'node.exe', exit: value => exits.push(value)},
+      process: {env, argv: ['node.exe', entry], execPath: 'node.exe', exit: value => exits.push(value)},
       require: name => {
         if (name === 'node:path') return path;
         if (name === './pm2_recovery.cjs') return {main: (received, pm2, apps) => {
@@ -228,5 +228,60 @@ test('CLI sets scoped home and loader and exits on result, rejection and hard de
     assert.ok(env.NODE_OPTIONS.includes('pm2_namespace.cjs'));
     timeout();
     assert.equal(exits.at(-1), 2);
+  }
+});
+
+test('read-only status never connects to a dead daemon and returns no process environment', async () => {
+  const f = fixture();
+  try {
+    f.pm2.Client.pingDaemon = cb => cb(false);
+    assert.deepEqual(await recovery.status(f.pm2, f.apps), {daemon: false, services: []});
+    assert.equal(f.counts.connect, 0);
+    f.pm2.Client.pingDaemon = cb => cb(true);
+    f.setRows([
+      {name: 'synthetic', pid: 42, pm2_env: {status: 'online', restart_time: 3, pm_uptime: 1700,
+        CODEXBOT_TOKEN: 'synthetic-secret', env: {CODEXBOT_TOKEN: 'synthetic-secret'}}},
+      {name: 'unrelated', pid: 7, pm2_env: {status: 'online'}},
+    ]);
+    const report = await recovery.status(f.pm2, f.apps);
+    assert.deepEqual(report, {daemon: true, services: [
+      {name: 'synthetic', pid: 42, status: 'online', restarts: 3, uptime: 1700}]});
+    assert.ok(!JSON.stringify(report).includes('synthetic-secret'));
+    assert.equal(f.counts.connect, 1);
+    assert.equal(f.counts.disconnect, 1);
+    f.pm2.Client.executeRemote = (method, options, cb) => cb(new Error('rpc failure'));
+    await assert.rejects(recovery.status(f.pm2, f.apps), /rpc failure/);
+    assert.equal(f.counts.disconnect, 2);
+  } finally {f.cleanup();}
+});
+
+test('CLI status mode prints the snapshot without recording recovery state', async () => {
+  const entry = path.resolve(__dirname, '../scripts/recover_pm2.cjs');
+  const code = fs.readFileSync(entry, 'utf8');
+  for (const failure of [false, true]) {
+    const exits = [], written = [];
+    const context = {__dirname: path.dirname(entry),
+      process: {env: {PATH: 'synthetic-path'}, argv: ['node.exe', entry, '--status'], execPath: 'node.exe',
+        exit: value => exits.push(value),
+        stdout: {write: (text, done) => { written.push(text); done(); }}},
+      require: name => {
+        if (name === 'node:path') return path;
+        if (name === './pm2_recovery.cjs') return {
+          main: () => assert.fail('status mode must not run recovery'),
+          status: (pm2, apps) => {
+            assert.equal(pm2, 'synthetic-pm2'); assert.deepEqual(apps, ['app']);
+            return failure ? Promise.reject(new Error('rpc failure')) : Promise.resolve({daemon: false, services: []});
+          }};
+        if (name.endsWith('ecosystem.config.js')) return {apps: ['app']};
+        if (name.endsWith(path.join('node_modules', 'pm2'))) return 'synthetic-pm2';
+        assert.equal(name, './pm2_namespace.cjs');
+      },
+      setTimeout: () => 17,
+      clearTimeout: id => assert.equal(id, 17)};
+    new vm.Script(code, {filename: entry}).runInNewContext(context);
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(exits, [failure ? 1 : 0]);
+    assert.deepEqual(written, failure ? [] : ['{"daemon":false,"services":[]}']);
   }
 });

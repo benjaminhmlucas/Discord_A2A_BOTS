@@ -115,6 +115,10 @@ class ConnectionManager:
         self._closing: dict[str, asyncio.Task[None]] = {}
         self._slots = asyncio.Semaphore(4)
 
+    def owned(self) -> tuple[str, ...]:
+        """Every connection this manager still owns, including connecting or failed cleanup."""
+        return tuple(self._active)
+
     def status(self, name: str) -> dict[str, Any]:
         profile = self.registry.profile(name)
         client = self._active.get(name)
