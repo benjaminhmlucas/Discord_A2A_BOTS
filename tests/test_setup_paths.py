@@ -284,6 +284,77 @@ def test_release_tree_errors_are_findings(tmp_path, kind):
     assert count == (0 if kind == "empty" else 1)
 
 
+# Built at runtime so this file never holds a literal personal path itself.
+B = "\\"
+PERSONAL = [
+    "C:" + B + "Users" + B + "someone" + B + "project",
+    "d:/users/" + "someone",
+    '{"root": "C:' + B * 2 + "Users" + B * 2 + 'someone"}',
+    "/home/" + "someone/project",
+    "/Users/" + "someone/project",
+    "file://" + "/home/" + "someone",
+    "C:" + B + "PROGRA" + "~1" + B + "tool",
+]
+PLACEHOLDERS = [
+    "C:" + B + "Users" + B + "<you>" + B + "project",
+    "C:" + B + "Users" + B + "%USERNAME%",
+    "C:" + B + "Users" + B + "Public" + B + "Documents",
+    "$HOME/project and /home/" + "$USER and ~/project",
+    "https://github.com/Users/project",
+    "C:/BotBridgeNotes and C:/Windows",
+    "mask = value & ~1",
+]
+
+
+@pytest.mark.parametrize("text", PERSONAL)
+def test_release_gate_finds_personal_folder_paths(tmp_path, text):
+    (tmp_path / "fixture.md").write_text(text, encoding="utf-8")
+    assert release.scan(tmp_path) == (1, [("fixture.md", "personal folder path")])
+
+
+@pytest.mark.parametrize("text", PLACEHOLDERS)
+def test_release_gate_allows_placeholder_and_shared_paths(tmp_path, text):
+    (tmp_path / "fixture.md").write_text(text, encoding="utf-8")
+    assert release.scan(tmp_path) == (1, [])
+
+
+def test_release_gate_finds_this_machines_and_configured_private_folders(tmp_path):
+    # Outside the checkout, so only the home pattern can match it.
+    home = Path(B + "srv" + B + "profile-owner")
+    deployed = "E:" + B + "Deployed" + B + "Install"
+    texts = {
+        "home.md": "Notes in /srv/profile-owner/notes",
+        "checkout.md": str(tmp_path).upper(),
+        "deployed.md": "Runs from e:/deployed/install today",
+        "similar.md": "E:" + B + "Deployed" + B + "InstallerCache and Install.d",
+    }
+    for name, text in texts.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    extra = os.pathsep.join(["", deployed, "E:" + B, "  "])
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": extra}),
+    ):
+        count, failures = release.scan(tmp_path)
+    assert count == 4
+    assert sorted(failures) == [
+        ("checkout.md", "personal folder path"),
+        ("deployed.md", "personal folder path"),
+        ("home.md", "personal folder path"),
+    ]
+    # A bare drive or filesystem root never becomes a pattern.
+    with (
+        patch.object(Path, "home", return_value=Path(B)),
+        patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": ""}),
+    ):
+        assert release.private_folders("E:" + B) == []
+
+
+def test_release_gate_reports_credentials_before_folder_paths(tmp_path):
+    (tmp_path / "fixture.md").write_text("sk-ant-" + "x" * 32 + " " + PERSONAL[0])
+    assert release.scan(tmp_path) == (1, [("fixture.md", "credential-like content")])
+
+
 def test_release_git_file_list_and_skipped_cache_directories(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "fixture.txt").write_text("fixture")

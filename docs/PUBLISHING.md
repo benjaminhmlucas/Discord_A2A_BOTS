@@ -6,7 +6,7 @@ Before uploading:
 
 1. Preserve the included MIT `LICENSE` file and copyright notice.
 2. Run all [testing procedures](TESTING.md), including the release checker, Windows setup integration and strict 100% coverage gates.
-3. Inspect every staged file with `git diff --cached`, including Markdown, fixtures and scripts. `.gitignore` does not remove previously tracked files.
+3. Inspect every staged file with `git diff --cached`, including Markdown, fixtures and scripts. Keep local folder paths out of files, pull request text and commit messages; the release checker catches them only in files. `.gitignore` does not remove previously tracked files.
 4. Run a dedicated secret scanner against the full Git history if any commits already exist. The included release checker does not examine history.
 5. Enable GitHub secret scanning/push protection and private vulnerability reporting where available. Review the security alert settings.
 6. Push only after the exact staged tree is reviewed. Do not supply bot credentials as Actions secrets; this CI workflow does not use live bots.

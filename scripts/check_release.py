@@ -1,7 +1,7 @@
 """Check tracked files (or a clean export) for private paths and common secret formats.
 
 This checks the current tree, not Git history, and does not guarantee absence of secrets.
-It reports file names only, never matched credential values.
+It reports file names only, never matched credential values or folder paths.
 """
 
 import os
@@ -54,6 +54,35 @@ PATTERNS = [
     re.compile(r"\b[A-Za-z0-9_-]{23,30}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,}\b"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 ]
+SEPARATOR = r"[\\/]{1,2}"  # One or two, so JSON-escaped Windows paths match too.
+# Personal folders on any machine. Placeholders such as C:\Users\<you>, %USERPROFILE%
+# and $HOME stay allowed, as do the shared Public and Default profiles.
+FOLDER_PATTERNS = [
+    re.compile(
+        rf"\b[A-Za-z]:{SEPARATOR}(?:Users|Documents and Settings){SEPARATOR}"
+        r"(?![<%$\{]|(?:Public|Default|All Users)\b)[^\s\\/\"'`<>|:*?]+",
+        re.I,
+    ),
+    re.compile(r"(?<![\w.~-])/(?:home|Users)/(?![<$\{])[A-Za-z0-9._-]+"),
+    # Windows 8.3 short names, such as a shortened profile folder in a temp path.
+    re.compile(r"\b[A-Z][A-Z0-9]{1,5}~[1-9]\b"),
+]
+
+
+def private_folders(root):
+    """This machine's home and checkout folders, plus any in BOTBRIDGE_PRIVATE_PATHS.
+
+    BOTBRIDGE_PRIVATE_PATHS lists more folders (such as a deployed install) separated
+    by os.pathsep. Bare drives and the filesystem root are never patterns.
+    """
+    extra = os.environ.get("BOTBRIDGE_PRIVATE_PATHS", "").split(os.pathsep)
+    patterns = []
+    for folder in (Path.home(), Path(root), *(Path(item) for item in extra if item.strip())):
+        parts = [part for part in re.split(r"[\\/]+", str(folder)) if part]
+        if len(parts) >= 2:
+            body = SEPARATOR.join(map(re.escape, parts))
+            patterns.append(re.compile(rf"(?<![\w.-]){body}(?![\w.-])", re.I))
+    return patterns
 
 
 def check_path(relative):
@@ -95,6 +124,7 @@ def files(root):
 
 def scan(root=ROOT):
     root = Path(root).resolve()
+    folders = FOLDER_PATTERNS + private_folders(root)
     failures, count = [], 0
     for path in files(root):
         count += 1
@@ -119,6 +149,8 @@ def scan(root=ROOT):
             continue
         if any(pattern.search(text) for pattern in PATTERNS):
             failures.append((str(relative), "credential-like content"))
+        elif any(pattern.search(text) for pattern in folders):
+            failures.append((str(relative), "personal folder path"))
     if count == 0:
         failures.append((".", "no tracked/exported files checked"))
     return count, failures
