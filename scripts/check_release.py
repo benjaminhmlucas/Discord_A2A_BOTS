@@ -58,9 +58,20 @@ SEPARATOR = r"[\\/]{1,2}"  # One or two, so JSON-escaped Windows paths match too
 UNROOTED = r"(?<![\w.~-])"  # Not inside a URL path or a longer path.
 # Where a folder name stops. A sentence's full stop may follow it; more name may not.
 NAME_END = r"(?![\w-]|\.+[\w-])"
-# The whole name of a shared Windows profile, optionally closing a sentence or bracket.
-SHARED = r"(?i:Public|Default|All Users)[.,;!)\]]*(?:[\s\\/\"'`<>|:*?]|\Z)"
+PATH_CHAR = r"[^\s\\/\"'`<>|:*?]"
+# Where a path written in prose stops: white space, a quote or bracket, or the end.
+PATH_STOP = r"(?=[\s\"'`<>|]|\Z)"
+# A shared Windows profile, only when its name is the whole folder: a separator follows,
+# sentence punctuation closes the path, or the path stops without the name running on
+# into a longer folder such as "Public Smith\notes".
+SHARED = (
+    r"(?i:Public|Default|All Users)"
+    rf"(?:[\\/]|[.,;!)\]]+{PATH_STOP}|{PATH_STOP}(?!(?:[ \t]+{PATH_CHAR}+){{1,3}}[\\/]))"
+)
 SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
+# A rooted local path: a drive, or a leading separator that is not part of a URL.
+LOCAL_ROOT = rf"(?:\b[A-Za-z]:|(?<![\w.~:/\\-])(?=[\\/])){SEPARATOR}"
+SEGMENT = r"[^\s\\/\"'`<>|:*?][^\\/\"'`<>|:*?\r\n]*"
 # Personal folders on any machine. Placeholders such as C:\Users\<you>, %USERPROFILE%
 # and $HOME stay allowed, as do the shared Public and Default profiles.
 FOLDER_PATTERNS = [
@@ -71,10 +82,9 @@ FOLDER_PATTERNS = [
     ),
     # Linux and macOS homes, and the WSL or Git Bash spelling of a Windows profile.
     re.compile(rf"{UNROOTED}/(?:home|(?:(?:mnt/)?[A-Za-z]/)?Users)/(?![<$\{{]|{SHARED})[\w.-]+"),
-    # Windows 8.3 short names, such as a shortened profile folder in a temp path:
-    # upper case anywhere, or any case beside a path separator (so "main~1" passes).
-    re.compile(rf"\b{SHORT_NAME}\b"),
-    re.compile(rf"(?<=[\\/]){SHORT_NAME}\b|\b{SHORT_NAME}(?=[\\/])", re.I),
+    # Windows 8.3 short names, such as a shortened profile folder in a temp path, in
+    # any case but only inside a rooted local path, so "HEAD~1" and URLs pass.
+    re.compile(rf"{LOCAL_ROOT}(?:{SEGMENT}{SEPARATOR})*{SHORT_NAME}(?![\w~-])", re.I),
 ]
 
 

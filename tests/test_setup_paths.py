@@ -297,17 +297,22 @@ PERSONAL = [
     # A personal name that only starts like a shared profile.
     "C:" + B + "Users" + B + "Public-Smith" + B + "notes",
     "c:/users/" + "Default.Jane/notes",
+    # A shared profile name that is only part of a longer folder name.
+    "C:" + B + "Users" + B + "Public Smith" + B + "notes",
+    "C:/Users/" + "Public!/notes",
+    "/Users/" + "All Users Backup/notes",
     # Home names outside ASCII.
     "/home/" + "\u00e9lodie/project",
     "/Users/" + "\u5f20\u4f1f",
     # The WSL and Git Bash spellings of a Windows profile.
     "/mnt/c/Users/" + "someone/project",
     "/c/Users/" + "someone",
-    # Short names in lower case, and with a two-digit suffix.
+    # Short names in lower case, with a two-digit suffix, and deeper in a local path.
     "c:/progra" + "~1/tool",
     "C:" + B + "PERSO" + "~12" + B + "tool",
-    "PERSO" + "~12",
-    "perso" + "~3/AppData",
+    '{"temp": "C:' + B * 2 + "Temp" + B * 2 + "PERSO" + "~1" + B * 2 + 'cache"}',
+    "D:" + B + "Work Files" + B + "perso" + "~3",
+    "/c/Users/" + "PERSO" + "~12/AppData",
 ]
 PLACEHOLDERS = [
     "C:" + B + "Users" + B + "<you>" + B + "project",
@@ -321,6 +326,11 @@ PLACEHOLDERS = [
     "C:/BotBridgeNotes and C:/Windows",
     "mask = value & ~1",
     "git reset main~1, about ~10 minutes",
+    # Short-name shapes outside a rooted local path.
+    "git show HEAD" + "~1 and HEAD" + "~12/notes",
+    "https://example.test/progra" + "~1/guide",
+    "Shared: C:/Users/Public and C:/Users/Default.",
+    "Shared files live in C:" + B + "Users" + B + "Public. More in docs/guide.md",
 ]
 
 
