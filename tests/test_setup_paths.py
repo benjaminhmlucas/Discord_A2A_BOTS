@@ -294,15 +294,33 @@ PERSONAL = [
     "/Users/" + "someone/project",
     "file://" + "/home/" + "someone",
     "C:" + B + "PROGRA" + "~1" + B + "tool",
+    # A personal name that only starts like a shared profile.
+    "C:" + B + "Users" + B + "Public-Smith" + B + "notes",
+    "c:/users/" + "Default.Jane/notes",
+    # Home names outside ASCII.
+    "/home/" + "\u00e9lodie/project",
+    "/Users/" + "\u5f20\u4f1f",
+    # The WSL and Git Bash spellings of a Windows profile.
+    "/mnt/c/Users/" + "someone/project",
+    "/c/Users/" + "someone",
+    # Short names in lower case, and with a two-digit suffix.
+    "c:/progra" + "~1/tool",
+    "C:" + B + "PERSO" + "~12" + B + "tool",
+    "PERSO" + "~12",
+    "perso" + "~3/AppData",
 ]
 PLACEHOLDERS = [
     "C:" + B + "Users" + B + "<you>" + B + "project",
     "C:" + B + "Users" + B + "%USERNAME%",
     "C:" + B + "Users" + B + "Public" + B + "Documents",
+    "Shared files live in C:" + B + "Users" + B + "Public.",
+    '"C:/Users/Default" and C:/Users/All Users/Desktop',
     "$HOME/project and /home/" + "$USER and ~/project",
     "https://github.com/Users/project",
+    "https://example.test/c/Users/guide",
     "C:/BotBridgeNotes and C:/Windows",
     "mask = value & ~1",
+    "git reset main~1, about ~10 minutes",
 ]
 
 
@@ -326,7 +344,11 @@ def test_release_gate_finds_this_machines_and_configured_private_folders(tmp_pat
         "home.md": "Notes in /srv/profile-owner/notes",
         "checkout.md": str(tmp_path).upper(),
         "deployed.md": "Runs from e:/deployed/install today",
-        "similar.md": "E:" + B + "Deployed" + B + "InstallerCache and Install.d",
+        "sentence.md": "It runs from E:/Deployed/Install.",
+        "similar.md": "E:" + B + "Deployed" + B + "InstallerCache and E:/Deployed/Install.d",
+        # The same folder names inside a URL are not a local path.
+        "url.md": "https://example.test/srv/profile-owner/guide and "
+        "https://example.test/e/Deployed/Install",
     }
     for name, text in texts.items():
         (tmp_path / name).write_text(text, encoding="utf-8")
@@ -336,11 +358,12 @@ def test_release_gate_finds_this_machines_and_configured_private_folders(tmp_pat
         patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": extra}),
     ):
         count, failures = release.scan(tmp_path)
-    assert count == 4
+    assert count == 6
     assert sorted(failures) == [
         ("checkout.md", "personal folder path"),
         ("deployed.md", "personal folder path"),
         ("home.md", "personal folder path"),
+        ("sentence.md", "personal folder path"),
     ]
     # A bare drive or filesystem root never becomes a pattern.
     with (
@@ -348,6 +371,12 @@ def test_release_gate_finds_this_machines_and_configured_private_folders(tmp_pat
         patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": ""}),
     ):
         assert release.private_folders("E:" + B) == []
+        (drive,) = release.private_folders(deployed)
+    # A folder on a Windows drive is also found in its WSL and Git Bash spellings.
+    assert drive.search("/mnt/e/deployed/install/logs")
+    assert drive.search("See /e/Deployed/Install.")
+    assert not drive.search("https://example.test/e/Deployed/Install")
+    assert not drive.search("/mnt/e/Deployed/Install.d")
 
 
 def test_release_gate_reports_credentials_before_folder_paths(tmp_path):

@@ -55,17 +55,26 @@ PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 ]
 SEPARATOR = r"[\\/]{1,2}"  # One or two, so JSON-escaped Windows paths match too.
+UNROOTED = r"(?<![\w.~-])"  # Not inside a URL path or a longer path.
+# Where a folder name stops. A sentence's full stop may follow it; more name may not.
+NAME_END = r"(?![\w-]|\.+[\w-])"
+# The whole name of a shared Windows profile, optionally closing a sentence or bracket.
+SHARED = r"(?i:Public|Default|All Users)[.,;!)\]]*(?:[\s\\/\"'`<>|:*?]|\Z)"
+SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
 # Personal folders on any machine. Placeholders such as C:\Users\<you>, %USERPROFILE%
 # and $HOME stay allowed, as do the shared Public and Default profiles.
 FOLDER_PATTERNS = [
     re.compile(
         rf"\b[A-Za-z]:{SEPARATOR}(?:Users|Documents and Settings){SEPARATOR}"
-        r"(?![<%$\{]|(?:Public|Default|All Users)\b)[^\s\\/\"'`<>|:*?]+",
+        rf"(?![<%$\{{]|{SHARED})[^\s\\/\"'`<>|:*?]+",
         re.I,
     ),
-    re.compile(r"(?<![\w.~-])/(?:home|Users)/(?![<$\{])[A-Za-z0-9._-]+"),
-    # Windows 8.3 short names, such as a shortened profile folder in a temp path.
-    re.compile(r"\b[A-Z][A-Z0-9]{1,5}~[1-9]\b"),
+    # Linux and macOS homes, and the WSL or Git Bash spelling of a Windows profile.
+    re.compile(rf"{UNROOTED}/(?:home|(?:(?:mnt/)?[A-Za-z]/)?Users)/(?![<$\{{]|{SHARED})[\w.-]+"),
+    # Windows 8.3 short names, such as a shortened profile folder in a temp path:
+    # upper case anywhere, or any case beside a path separator (so "main~1" passes).
+    re.compile(rf"\b{SHORT_NAME}\b"),
+    re.compile(rf"(?<=[\\/]){SHORT_NAME}\b|\b{SHORT_NAME}(?=[\\/])", re.I),
 ]
 
 
@@ -73,15 +82,22 @@ def private_folders(root):
     """This machine's home and checkout folders, plus any in BOTBRIDGE_PRIVATE_PATHS.
 
     BOTBRIDGE_PRIVATE_PATHS lists more folders (such as a deployed install) separated
-    by os.pathsep. Bare drives and the filesystem root are never patterns.
+    by os.pathsep. Bare drives and the filesystem root are never patterns. A folder
+    on a Windows drive is also matched in its WSL and Git Bash spellings.
     """
     extra = os.environ.get("BOTBRIDGE_PRIVATE_PATHS", "").split(os.pathsep)
     patterns = []
     for folder in (Path.home(), Path(root), *(Path(item) for item in extra if item.strip())):
         parts = [part for part in re.split(r"[\\/]+", str(folder)) if part]
-        if len(parts) >= 2:
-            body = SEPARATOR.join(map(re.escape, parts))
-            patterns.append(re.compile(rf"(?<![\w.-]){body}(?![\w.-])", re.I))
+        if len(parts) < 2:
+            continue
+        # Keep a rooted path's leading separator, so the same text inside a URL passes.
+        lead = SEPARATOR if str(folder)[:1] in ("\\", "/") else ""
+        head, *rest = map(re.escape, parts)
+        head = rf"{UNROOTED}{lead}{head}"
+        if re.fullmatch(r"[A-Za-z]:", parts[0]):
+            head = rf"(?:{head}|{UNROOTED}/(?:mnt/)?{parts[0][0]})"
+        patterns.append(re.compile(SEPARATOR.join([head, *rest]) + NAME_END, re.I))
     return patterns
 
 
