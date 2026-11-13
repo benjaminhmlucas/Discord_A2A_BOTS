@@ -58,34 +58,59 @@ SEPARATOR = r"[\\/]{1,2}"  # One or two, so JSON-escaped Windows paths match too
 UNROOTED = r"(?<![\w.~-])"  # Not inside a URL path or a longer path.
 # Where a folder name stops. A sentence's full stop may follow it; more name may not.
 NAME_END = r"(?![\w-]|\.+[\w-])"
-PATH_CHAR = r"[^\s\\/\"'`<>|:*?]"
-# Where a path written in prose stops: white space, a quote or bracket, or the end.
-PATH_STOP = r"(?=[\s\"'`<>|]|\Z)"
-# A shared Windows profile, only when its name is the whole folder: a separator follows,
-# sentence punctuation closes the path, or the path stops without the name running on
-# into a longer folder such as "Public Smith\notes".
-SHARED = (
-    r"(?i:Public|Default|All Users)"
-    rf"(?:[\\/]|[.,;!)\]]+{PATH_STOP}|{PATH_STOP}(?!(?:[ \t]+{PATH_CHAR}+){{1,3}}[\\/]))"
-)
-SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
-# A rooted local path: a drive, or a leading separator that is not part of a URL.
-LOCAL_ROOT = rf"(?:\b[A-Za-z]:|(?<![\w.~:/\\-])(?=[\\/])){SEPARATOR}"
-SEGMENT = r"[^\s\\/\"'`<>|:*?][^\\/\"'`<>|:*?\r\n]*"
-# Personal folders on any machine. Placeholders such as C:\Users\<you>, %USERPROFILE%
-# and $HOME stay allowed, as do the shared Public and Default profiles.
-FOLDER_PATTERNS = [
+# Every web URL, removed before folder paths are matched so nothing inside one counts.
+# file: URLs name local paths and stay.
+URL = re.compile(r"\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+://[^\s\"'`<>]*", re.I)
+# One folder name: anything up to a separator, a character Windows forbids, or the line end.
+FOLDER_NAME = r"[^\s\\/\"'`<>|:*?][^\\/\"'`<>|:*?\r\n]*"
+SHARED_PROFILES = {"public", "default", "all users"}
+# A shared profile named in an unquoted sentence, then white space or punctuation.
+SHARED_IN_PROSE = re.compile(r"(?:Public|Default|All Users)[.,;!)\]]*(?:\s|$)", re.I)
+# A profile folder, with any quote that opens the path, then the folder name.
+PROFILE_PATTERNS = [
     re.compile(
-        rf"\b[A-Za-z]:{SEPARATOR}(?:Users|Documents and Settings){SEPARATOR}"
-        rf"(?![<%$\{{]|{SHARED})[^\s\\/\"'`<>|:*?]+",
+        rf"(?P<quote>[\"'`]?)\b[A-Za-z]:{SEPARATOR}(?:Users|Documents and Settings)"
+        rf"{SEPARATOR}(?P<name>{FOLDER_NAME})?",
         re.I,
     ),
     # Linux and macOS homes, and the WSL or Git Bash spelling of a Windows profile.
-    re.compile(rf"{UNROOTED}/(?:home|(?:(?:mnt/)?[A-Za-z]/)?Users)/(?![<$\{{]|{SHARED})[\w.-]+"),
-    # Windows 8.3 short names, such as a shortened profile folder in a temp path, in
-    # any case but only inside a rooted local path, so "HEAD~1" and URLs pass.
-    re.compile(rf"{LOCAL_ROOT}(?:{SEGMENT}{SEPARATOR})*{SHORT_NAME}(?![\w~-])", re.I),
+    re.compile(
+        rf"(?P<quote>[\"'`]?){UNROOTED}/(?:home|(?:(?:mnt/)?[A-Za-z]/)?Users)/"
+        rf"(?P<name>{FOLDER_NAME})?"
+    ),
 ]
+SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
+# A rooted local path: a drive, or a leading separator not inside a longer word or path.
+LOCAL_ROOT = rf"(?:\b[A-Za-z]:|(?<![\w.~:/\\-])(?=[\\/])){SEPARATOR}"
+FOLDER_PATTERNS = [
+    # Windows 8.3 short names, such as a shortened profile folder in a temp path, in
+    # any case but only inside a rooted local path, so "HEAD~1" passes.
+    re.compile(rf"{LOCAL_ROOT}(?:{FOLDER_NAME}{SEPARATOR})*{SHORT_NAME}(?![\w~-])", re.I),
+]
+
+
+def personal_profile(match):
+    """Whether a profile folder match names a person rather than a placeholder or share.
+
+    The whole folder name is compared with the shared profiles. A separator or the quote
+    that opened the path marks where the name ends, so a Public profile path quoted with
+    a longer name, or followed by more name before the next separator, is personal. In
+    unquoted prose with no separator after it, the name may instead end at white space
+    or sentence punctuation, so a sentence can name the Public profile and continue.
+    """
+    name = match["name"]
+    if not name or name[0] in "<%${":
+        return False
+    if match["quote"] or match.string[match.end() : match.end() + 1] in ("\\", "/"):
+        return name.casefold() not in SHARED_PROFILES
+    return not SHARED_IN_PROSE.match(name)
+
+
+def personal_path(text, folders):
+    text = URL.sub(" ", text)
+    return any(
+        personal_profile(match) for pattern in PROFILE_PATTERNS for match in pattern.finditer(text)
+    ) or any(pattern.search(text) for pattern in folders)
 
 
 def private_folders(root):
@@ -175,7 +200,7 @@ def scan(root=ROOT):
             continue
         if any(pattern.search(text) for pattern in PATTERNS):
             failures.append((str(relative), "credential-like content"))
-        elif any(pattern.search(text) for pattern in folders):
+        elif personal_path(text, folders):
             failures.append((str(relative), "personal folder path"))
     if count == 0:
         failures.append((".", "no tracked/exported files checked"))

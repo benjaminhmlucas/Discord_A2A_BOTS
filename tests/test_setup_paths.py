@@ -301,6 +301,14 @@ PERSONAL = [
     "C:" + B + "Users" + B + "Public Smith" + B + "notes",
     "C:/Users/" + "Public!/notes",
     "/Users/" + "All Users Backup/notes",
+    # The whole folder name counts: a quote ends it, and so does a separator however
+    # many words come first.
+    '"C:/Users/' + 'Public Smith"',
+    "'C:/Users/" + "Public!'",
+    "C:/Users/" + "Public One Two Three Four/notes",
+    "`/home/" + "Default Jane`",
+    # A file URL names a local path.
+    "file:///C:/Users/" + "someone",
     # Home names outside ASCII.
     "/home/" + "\u00e9lodie/project",
     "/Users/" + "\u5f20\u4f1f",
@@ -328,9 +336,15 @@ PLACEHOLDERS = [
     "git reset main~1, about ~10 minutes",
     # Short-name shapes outside a rooted local path.
     "git show HEAD" + "~1 and HEAD" + "~12/notes",
-    "https://example.test/progra" + "~1/guide",
     "Shared: C:/Users/Public and C:/Users/Default.",
-    "Shared files live in C:" + B + "Users" + B + "Public. More in docs/guide.md",
+    "`C:" + B + "Users" + B + 'Public` and "C:/Users/All Users"',
+    "C:" + B + "Users" + B + "All Users is shared by everyone",
+    "See /home/ for each account",
+    # Nothing inside a web URL counts, wherever the path starts within it.
+    "https://example.test/progra" + "~1/guide",
+    "https://example.test/releases!/progra" + "~1/guide",
+    "https://example.test/?next=/progra" + "~1/guide&u=/home/" + "someone",
+    "<https://example.test/C:/Users/" + "someone>",
 ]
 
 
