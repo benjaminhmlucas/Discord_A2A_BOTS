@@ -300,13 +300,23 @@ PERSONAL = [
     # A shared profile name that is only part of a longer folder name.
     "C:" + B + "Users" + B + "Public Smith" + B + "notes",
     "C:/Users/" + "Public!/notes",
-    "/Users/" + "All Users Backup/notes",
+    "C:/Users/" + "All Users Backup/notes",
     # The whole folder name counts: a quote ends it, and so does a separator however
     # many words come first.
     '"C:/Users/' + 'Public Smith"',
     "'C:/Users/" + "Public!'",
     "C:/Users/" + "Public One Two Three Four/notes",
     "`/home/" + "Default Jane`",
+    # Shared profiles exist only on Windows. Under a Linux or macOS home the same
+    # names are ordinary accounts.
+    "/home/" + "public/notes",
+    "/home/" + "Default",
+    "/Users/" + "Public/notes",
+    # A personal path after a shared one on the same line.
+    "C:" + B + "Users" + B + "Public and C:" + B + "Users" + B + "someone",
+    "Shared: C:/Users/Public. See /home/" + "someone",
+    # Sentence punctuation ends a name only when white space follows it.
+    "C:/Users/" + "Public./notes",
     # A file URL names a local path.
     "file:///C:/Users/" + "someone",
     # Home names outside ASCII.
@@ -327,6 +337,8 @@ PLACEHOLDERS = [
     "C:" + B + "Users" + B + "%USERNAME%",
     "C:" + B + "Users" + B + "Public" + B + "Documents",
     "Shared files live in C:" + B + "Users" + B + "Public.",
+    "Shared files live in C:/Users/Public. More in docs/guide.md",
+    "/mnt/c/Users/Public/Documents and /c/Users/Default",
     '"C:/Users/Default" and C:/Users/All Users/Desktop',
     "$HOME/project and /home/" + "$USER and ~/project",
     "https://github.com/Users/project",

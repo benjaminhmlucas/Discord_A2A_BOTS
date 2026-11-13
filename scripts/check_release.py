@@ -64,21 +64,21 @@ URL = re.compile(r"\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+://[^\s\"'`<>]*", re.I)
 # One folder name: anything up to a separator, a character Windows forbids, or the line end.
 FOLDER_NAME = r"[^\s\\/\"'`<>|:*?][^\\/\"'`<>|:*?\r\n]*"
 SHARED_PROFILES = {"public", "default", "all users"}
+SHARED = r"(?:Public|Default|All Users)"
 # A shared profile named in an unquoted sentence, then white space or punctuation.
-SHARED_IN_PROSE = re.compile(r"(?:Public|Default|All Users)[.,;!)\]]*(?:\s|$)", re.I)
-# A profile folder, with any quote that opens the path, then the folder name.
-PROFILE_PATTERNS = [
-    re.compile(
-        rf"(?P<quote>[\"'`]?)\b[A-Za-z]:{SEPARATOR}(?:Users|Documents and Settings)"
-        rf"{SEPARATOR}(?P<name>{FOLDER_NAME})?",
-        re.I,
-    ),
-    # Linux and macOS homes, and the WSL or Git Bash spelling of a Windows profile.
-    re.compile(
-        rf"(?P<quote>[\"'`]?){UNROOTED}/(?:home|(?:(?:mnt/)?[A-Za-z]/)?Users)/"
-        rf"(?P<name>{FOLDER_NAME})?"
-    ),
-]
+SHARED_IN_PROSE = re.compile(rf"{SHARED}[.,;!)\]]*(?:\s|$)", re.I)
+# A shared profile that ends a sentence or clause: punctuation, then white space.
+SHARED_ENDS_SENTENCE = re.compile(rf"{SHARED}[.,;!)\]]+\s", re.I)
+# A profile root, with any quote that opens the path. The folder name after it is read
+# in a lookahead, so a second path later on the same line is still matched.
+PROFILE = re.compile(
+    rf"(?P<quote>[\"'`]?)(?:"
+    # A Windows profile by drive letter.
+    rf"\b(?P<drive>[A-Za-z]:){SEPARATOR}(?i:Users|Documents and Settings){SEPARATOR}"
+    # Its WSL or Git Bash spelling, or a Linux or macOS home.
+    rf"|{UNROOTED}/(?:(?P<mount>(?:mnt/)?[A-Za-z]/)Users|home|Users)/"
+    rf")(?=(?P<name>{FOLDER_NAME})?)"
+)
 SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
 # A rooted local path: a drive, or a leading separator not inside a longer word or path.
 LOCAL_ROOT = rf"(?:\b[A-Za-z]:|(?<![\w.~:/\\-])(?=[\\/])){SEPARATOR}"
@@ -90,27 +90,37 @@ FOLDER_PATTERNS = [
 
 
 def personal_profile(match):
-    """Whether a profile folder match names a person rather than a placeholder or share.
+    """Whether a profile root is followed by a person's folder, not a placeholder or share.
+
+    Only a Windows profile path, in any of its spellings, can name a shared profile.
+    Under a Linux or macOS home, every folder belongs to an account.
 
     The whole folder name is compared with the shared profiles. A separator or the quote
-    that opened the path marks where the name ends, so a Public profile path quoted with
-    a longer name, or followed by more name before the next separator, is personal. In
-    unquoted prose with no separator after it, the name may instead end at white space
-    or sentence punctuation, so a sentence can name the Public profile and continue.
+    that opened the path marks where the name ends, so a shared name quoted with more
+    text, or followed by more name before the next separator, is personal. In unquoted
+    text the name also ends at sentence punctuation followed by white space, so a
+    sentence can name a shared profile and go on to mention another path. With no
+    separator after it, the name may end at white space alone.
     """
     name = match["name"]
     if not name or name[0] in "<%${":
         return False
-    if match["quote"] or match.string[match.end() : match.end() + 1] in ("\\", "/"):
-        return name.casefold() not in SHARED_PROFILES
-    return not SHARED_IN_PROSE.match(name)
+    if not (match["drive"] or match["mount"]):
+        return True
+    if name.casefold() in SHARED_PROFILES:
+        return False
+    if match["quote"]:
+        return True
+    end = match.end("name")
+    separated = match.string[end : end + 1] in ("\\", "/")
+    return not (SHARED_ENDS_SENTENCE if separated else SHARED_IN_PROSE).match(name)
 
 
 def personal_path(text, folders):
     text = URL.sub(" ", text)
-    return any(
-        personal_profile(match) for pattern in PROFILE_PATTERNS for match in pattern.finditer(text)
-    ) or any(pattern.search(text) for pattern in folders)
+    return any(personal_profile(match) for match in PROFILE.finditer(text)) or any(
+        pattern.search(text) for pattern in folders
+    )
 
 
 def private_folders(root):
