@@ -284,6 +284,142 @@ def test_release_tree_errors_are_findings(tmp_path, kind):
     assert count == (0 if kind == "empty" else 1)
 
 
+# Built at runtime so this file never holds a literal personal path itself.
+B = "\\"
+PERSONAL = [
+    "C:" + B + "Users" + B + "someone" + B + "project",
+    "d:/users/" + "someone",
+    '{"root": "C:' + B * 2 + "Users" + B * 2 + 'someone"}',
+    "/home/" + "someone/project",
+    "/Users/" + "someone/project",
+    "file://" + "/home/" + "someone",
+    "C:" + B + "PROGRA" + "~1" + B + "tool",
+    # A personal name that only starts like a shared profile.
+    "C:" + B + "Users" + B + "Public-Smith" + B + "notes",
+    "c:/users/" + "Default.Jane/notes",
+    # A shared profile name that is only part of a longer folder name.
+    "C:" + B + "Users" + B + "Public Smith" + B + "notes",
+    "C:/Users/" + "Public!/notes",
+    "C:/Users/" + "All Users Backup/notes",
+    # The whole folder name counts: a quote ends it, and so does a separator however
+    # many words come first.
+    '"C:/Users/' + 'Public Smith"',
+    "'C:/Users/" + "Public!'",
+    "C:/Users/" + "Public One Two Three Four/notes",
+    "`/home/" + "Default Jane`",
+    # Shared profiles exist only on Windows. Under a Linux or macOS home the same
+    # names are ordinary accounts.
+    "/home/" + "public/notes",
+    "/home/" + "Default",
+    "/Users/" + "Public/notes",
+    # A personal path after a shared one on the same line.
+    "C:" + B + "Users" + B + "Public and C:" + B + "Users" + B + "someone",
+    "Shared: C:/Users/Public. See /home/" + "someone",
+    # Sentence punctuation ends a name only when white space follows it.
+    "C:/Users/" + "Public./notes",
+    # A file URL names a local path.
+    "file:///C:/Users/" + "someone",
+    # Home names outside ASCII.
+    "/home/" + "\u00e9lodie/project",
+    "/Users/" + "\u5f20\u4f1f",
+    # The WSL and Git Bash spellings of a Windows profile.
+    "/mnt/c/Users/" + "someone/project",
+    "/c/Users/" + "someone",
+    # Short names in lower case, with a two-digit suffix, and deeper in a local path.
+    "c:/progra" + "~1/tool",
+    "C:" + B + "PERSO" + "~12" + B + "tool",
+    '{"temp": "C:' + B * 2 + "Temp" + B * 2 + "PERSO" + "~1" + B * 2 + 'cache"}',
+    "D:" + B + "Work Files" + B + "perso" + "~3",
+    "/c/Users/" + "PERSO" + "~12/AppData",
+]
+PLACEHOLDERS = [
+    "C:" + B + "Users" + B + "<you>" + B + "project",
+    "C:" + B + "Users" + B + "%USERNAME%",
+    "C:" + B + "Users" + B + "Public" + B + "Documents",
+    "Shared files live in C:" + B + "Users" + B + "Public.",
+    "Shared files live in C:/Users/Public. More in docs/guide.md",
+    "/mnt/c/Users/Public/Documents and /c/Users/Default",
+    '"C:/Users/Default" and C:/Users/All Users/Desktop',
+    "$HOME/project and /home/" + "$USER and ~/project",
+    "https://github.com/Users/project",
+    "https://example.test/c/Users/guide",
+    "C:/BotBridgeNotes and C:/Windows",
+    "mask = value & ~1",
+    "git reset main~1, about ~10 minutes",
+    # Short-name shapes outside a rooted local path.
+    "git show HEAD" + "~1 and HEAD" + "~12/notes",
+    "Shared: C:/Users/Public and C:/Users/Default.",
+    "`C:" + B + "Users" + B + 'Public` and "C:/Users/All Users"',
+    "C:" + B + "Users" + B + "All Users is shared by everyone",
+    "See /home/ for each account",
+    # Nothing inside a web URL counts, wherever the path starts within it.
+    "https://example.test/progra" + "~1/guide",
+    "https://example.test/releases!/progra" + "~1/guide",
+    "https://example.test/?next=/progra" + "~1/guide&u=/home/" + "someone",
+    "<https://example.test/C:/Users/" + "someone>",
+]
+
+
+@pytest.mark.parametrize("text", PERSONAL)
+def test_release_gate_finds_personal_folder_paths(tmp_path, text):
+    (tmp_path / "fixture.md").write_text(text, encoding="utf-8")
+    assert release.scan(tmp_path) == (1, [("fixture.md", "personal folder path")])
+
+
+@pytest.mark.parametrize("text", PLACEHOLDERS)
+def test_release_gate_allows_placeholder_and_shared_paths(tmp_path, text):
+    (tmp_path / "fixture.md").write_text(text, encoding="utf-8")
+    assert release.scan(tmp_path) == (1, [])
+
+
+def test_release_gate_finds_this_machines_and_configured_private_folders(tmp_path):
+    # Outside the checkout, so only the home pattern can match it.
+    home = Path(B + "srv" + B + "profile-owner")
+    deployed = "E:" + B + "Deployed" + B + "Install"
+    texts = {
+        "home.md": "Notes in /srv/profile-owner/notes",
+        "checkout.md": str(tmp_path).upper(),
+        "deployed.md": "Runs from e:/deployed/install today",
+        "sentence.md": "It runs from E:/Deployed/Install.",
+        "similar.md": "E:" + B + "Deployed" + B + "InstallerCache and E:/Deployed/Install.d",
+        # The same folder names inside a URL are not a local path.
+        "url.md": "https://example.test/srv/profile-owner/guide and "
+        "https://example.test/e/Deployed/Install",
+    }
+    for name, text in texts.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    extra = os.pathsep.join(["", deployed, "E:" + B, "  "])
+    with (
+        patch.object(Path, "home", return_value=home),
+        patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": extra}),
+    ):
+        count, failures = release.scan(tmp_path)
+    assert count == 6
+    assert sorted(failures) == [
+        ("checkout.md", "personal folder path"),
+        ("deployed.md", "personal folder path"),
+        ("home.md", "personal folder path"),
+        ("sentence.md", "personal folder path"),
+    ]
+    # A bare drive or filesystem root never becomes a pattern.
+    with (
+        patch.object(Path, "home", return_value=Path(B)),
+        patch.dict(os.environ, {"BOTBRIDGE_PRIVATE_PATHS": ""}),
+    ):
+        assert release.private_folders("E:" + B) == []
+        (drive,) = release.private_folders(deployed)
+    # A folder on a Windows drive is also found in its WSL and Git Bash spellings.
+    assert drive.search("/mnt/e/deployed/install/logs")
+    assert drive.search("See /e/Deployed/Install.")
+    assert not drive.search("https://example.test/e/Deployed/Install")
+    assert not drive.search("/mnt/e/Deployed/Install.d")
+
+
+def test_release_gate_reports_credentials_before_folder_paths(tmp_path):
+    (tmp_path / "fixture.md").write_text("sk-ant-" + "x" * 32 + " " + PERSONAL[0])
+    assert release.scan(tmp_path) == (1, [("fixture.md", "credential-like content")])
+
+
 def test_release_git_file_list_and_skipped_cache_directories(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "fixture.txt").write_text("fixture")

@@ -187,6 +187,6 @@ caps. Work prompts contain only the authenticated owner's explicit text.
 
 ## Publication
 
-Upload the files in this clean template, not a running installation. Follow [the publication notes](docs/PUBLISHING.md) before the first push. The release checker checks the current file tree and common credential patterns; it does not scan Git history or prove the absence of every secret. Preserve the MIT copyright and license notice when redistributing the project.
+Upload the files in this clean template, not a running installation. Follow [the publication notes](docs/PUBLISHING.md) before the first push. The release checker checks the current file tree for common credential patterns and personal folder paths: user-profile folders (including their WSL and Git Bash spellings), Windows short names, and this machine's home and checkout folders. To also block other private folders, such as a deployed install, set `BOTBRIDGE_PRIVATE_PATHS` to them, separated by `;` on Windows or `:` elsewhere. Write examples with a placeholder such as `C:\Users\<you>`. The checker does not scan Git history or prove the absence of every secret. Preserve the MIT copyright and license notice when redistributing the project.
 
 Local `/work` is disabled by default. The security boundaries and remaining limitations are described in [SECURITY.md](SECURITY.md).
