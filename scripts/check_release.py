@@ -1,7 +1,7 @@
 """Check tracked files (or a clean export) for private paths and common secret formats.
 
 This checks the current tree, not Git history, and does not guarantee absence of secrets.
-It reports file names only, never matched credential values.
+It reports file names only, never matched credential values or folder paths.
 """
 
 import os
@@ -54,6 +54,96 @@ PATTERNS = [
     re.compile(r"\b[A-Za-z0-9_-]{23,30}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,}\b"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 ]
+SEPARATOR = r"[\\/]{1,2}"  # One or two, so JSON-escaped Windows paths match too.
+UNROOTED = r"(?<![\w.~-])"  # Not inside a URL path or a longer path.
+# Where a folder name stops. A sentence's full stop may follow it; more name may not.
+NAME_END = r"(?![\w-]|\.+[\w-])"
+# Every web URL, removed before folder paths are matched so nothing inside one counts.
+# file: URLs name local paths and stay.
+URL = re.compile(r"\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+://[^\s\"'`<>]*", re.I)
+# One folder name: anything up to a separator, a character Windows forbids, or the line end.
+FOLDER_NAME = r"[^\s\\/\"'`<>|:*?][^\\/\"'`<>|:*?\r\n]*"
+SHARED_PROFILES = {"public", "default", "all users"}
+SHARED = r"(?:Public|Default|All Users)"
+# A shared profile named in an unquoted sentence, then white space or punctuation.
+SHARED_IN_PROSE = re.compile(rf"{SHARED}[.,;!)\]]*(?:\s|$)", re.I)
+# A shared profile that ends a sentence or clause: punctuation, then white space.
+SHARED_ENDS_SENTENCE = re.compile(rf"{SHARED}[.,;!)\]]+\s", re.I)
+# A profile root, with any quote that opens the path. The folder name after it is read
+# in a lookahead, so a second path later on the same line is still matched.
+PROFILE = re.compile(
+    rf"(?P<quote>[\"'`]?)(?:"
+    # A Windows profile by drive letter.
+    rf"\b(?P<drive>[A-Za-z]:){SEPARATOR}(?i:Users|Documents and Settings){SEPARATOR}"
+    # Its WSL or Git Bash spelling, or a Linux or macOS home.
+    rf"|{UNROOTED}/(?:(?P<mount>(?:mnt/)?[A-Za-z]/)Users|home|Users)/"
+    rf")(?=(?P<name>{FOLDER_NAME})?)"
+)
+SHORT_NAME = r"[A-Z][A-Z0-9]{1,5}~[1-9][0-9]?"
+# A rooted local path: a drive, or a leading separator not inside a longer word or path.
+LOCAL_ROOT = rf"(?:\b[A-Za-z]:|(?<![\w.~:/\\-])(?=[\\/])){SEPARATOR}"
+FOLDER_PATTERNS = [
+    # Windows 8.3 short names, such as a shortened profile folder in a temp path, in
+    # any case but only inside a rooted local path, so "HEAD~1" passes.
+    re.compile(rf"{LOCAL_ROOT}(?:{FOLDER_NAME}{SEPARATOR})*{SHORT_NAME}(?![\w~-])", re.I),
+]
+
+
+def personal_profile(match):
+    """Whether a profile root is followed by a person's folder, not a placeholder or share.
+
+    Only a Windows profile path, in any of its spellings, can name a shared profile.
+    Under a Linux or macOS home, every folder belongs to an account.
+
+    The whole folder name is compared with the shared profiles. A separator or the quote
+    that opened the path marks where the name ends, so a shared name quoted with more
+    text, or followed by more name before the next separator, is personal. In unquoted
+    text the name also ends at sentence punctuation followed by white space, so a
+    sentence can name a shared profile and go on to mention another path. With no
+    separator after it, the name may end at white space alone.
+    """
+    name = match["name"]
+    if not name or name[0] in "<%${":
+        return False
+    if not (match["drive"] or match["mount"]):
+        return True
+    if name.casefold() in SHARED_PROFILES:
+        return False
+    if match["quote"]:
+        return True
+    end = match.end("name")
+    separated = match.string[end : end + 1] in ("\\", "/")
+    return not (SHARED_ENDS_SENTENCE if separated else SHARED_IN_PROSE).match(name)
+
+
+def personal_path(text, folders):
+    text = URL.sub(" ", text)
+    return any(personal_profile(match) for match in PROFILE.finditer(text)) or any(
+        pattern.search(text) for pattern in folders
+    )
+
+
+def private_folders(root):
+    """This machine's home and checkout folders, plus any in BOTBRIDGE_PRIVATE_PATHS.
+
+    BOTBRIDGE_PRIVATE_PATHS lists more folders (such as a deployed install) separated
+    by os.pathsep. Bare drives and the filesystem root are never patterns. A folder
+    on a Windows drive is also matched in its WSL and Git Bash spellings.
+    """
+    extra = os.environ.get("BOTBRIDGE_PRIVATE_PATHS", "").split(os.pathsep)
+    patterns = []
+    for folder in (Path.home(), Path(root), *(Path(item) for item in extra if item.strip())):
+        parts = [part for part in re.split(r"[\\/]+", str(folder)) if part]
+        if len(parts) < 2:
+            continue
+        # Keep a rooted path's leading separator, so the same text inside a URL passes.
+        lead = SEPARATOR if str(folder)[:1] in ("\\", "/") else ""
+        head, *rest = map(re.escape, parts)
+        head = rf"{UNROOTED}{lead}{head}"
+        if re.fullmatch(r"[A-Za-z]:", parts[0]):
+            head = rf"(?:{head}|{UNROOTED}/(?:mnt/)?{parts[0][0]})"
+        patterns.append(re.compile(SEPARATOR.join([head, *rest]) + NAME_END, re.I))
+    return patterns
 
 
 def check_path(relative):
@@ -95,6 +185,7 @@ def files(root):
 
 def scan(root=ROOT):
     root = Path(root).resolve()
+    folders = FOLDER_PATTERNS + private_folders(root)
     failures, count = [], 0
     for path in files(root):
         count += 1
@@ -119,6 +210,8 @@ def scan(root=ROOT):
             continue
         if any(pattern.search(text) for pattern in PATTERNS):
             failures.append((str(relative), "credential-like content"))
+        elif personal_path(text, folders):
+            failures.append((str(relative), "personal folder path"))
     if count == 0:
         failures.append((".", "no tracked/exported files checked"))
     return count, failures
