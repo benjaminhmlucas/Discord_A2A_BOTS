@@ -98,17 +98,25 @@ Management operations explicitly set `BOTBRIDGE_PM2_METADATA_ONLY=1` so process-
 lookup and operation summaries use metadata instead of blocking Windows WMI metrics.
 This requires the pinned Client.executeRemote adapter too. Direct PM2 monitoring
 without this opt-in retains normal CPU/memory collection.
-The adapter intentionally requires PM2 7.0.4. A dependency update that
+The adapter intentionally requires PM2 7.1.2. A dependency update that
 changes this version must update and retest the adapter and both npm manifests
 together. The production logrotate installer copies the committed manifest and integrity
 lock and runs npm ci with lifecycle scripts disabled; CI audits that same graph.
-For 7.0.4, the published module installer and God monitoring implementation are
-unchanged from 7.0.1; the Client and socket-path changes remove unused win64 checks.
+For 7.1.2, compared with the previously reviewed 7.0.4, the socket-path module and the
+module installer are unchanged. `Client.executeRemote` keeps its signature; the Client
+changes only make RPC disconnects close the connection being closed. God monitoring keeps
+`getMonitorData` and `getFormatedProcesses`; it now runs CPU/memory queries one at a time
+with a timeout and skips invalid process IDs. The global command-line options that
+`scripts/manage.py` parses are unchanged.
 The actual Windows lifecycle test also disables the metadata flag and checks that
 ordinary process monitoring still returns numeric CPU and memory measurements.
-Both npm graphs pin `ip-address` 10.7.4 to address
-[GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5);
-this changes the transitive parser while retaining PM2 7.0.4.
+Both npm graphs keep the shared overrides, including `ip-address` 10.7.4 for
+[GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5).
+PM2 7.1.2 no longer depends on `ip-address`, `basic-ftp` or `chokidar`, so those
+three overrides currently match nothing; they stay as a guard if a later version brings
+the packages back. PM2 7.1.2 instead ships its own patched copy of Chokidar 3.6.0 for
+`pm2 start --watch`, which npm overrides and `npm audit` cannot see. BotBridge services
+run with `watch: false`, so that copy is not used here.
 The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 
@@ -172,6 +180,6 @@ operators must inspect fresh recovery/health state and repair the cause. It does
 restart stopped services merely to make monitoring green.
 
 Recovery's metadata-only process-list RPC avoids Windows CPU/memory query delays.
-The adapter enables it only for an explicit boolean flag in pinned PM2 7.0.4;
+The adapter enables it only for an explicit boolean flag in pinned PM2 7.1.2;
 normal monitoring continues to collect metrics. The actual scheduled-task test
 verifies cold recovery, deliberately stopped service preservation and cleanup.
