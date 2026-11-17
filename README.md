@@ -87,7 +87,7 @@ npm ci --prefix tools/pm2
 npm audit --prefix tools/pm2
 ```
 
-Run `scripts/start.ps1`. Startup invokes Node directly with the configured local PM2 entry, uses a dedicated `.pm2` directory inside this checkout, installs log rotation with the same dependency overrides, verifies its Boolean parser fix, and starts the configured processes. It does not register a login startup task or save the process list automatically. The pinned Chokidar 4 watcher supports literal paths; glob-based PM2 watch configuration is unsupported. Bot services use `watch: false`.
+Run `scripts/start.ps1`. Startup invokes Node directly with the configured local PM2 entry, uses a dedicated `.pm2` directory inside this checkout, installs log rotation with the same dependency overrides, verifies its Boolean parser fix, and starts the configured processes. It does not register a login startup task or save the process list automatically. PM2 7.1.2 watches files with its own patched copy of Chokidar 3.6.0, which the dependency overrides and audits don't cover, so file watching is left off: bot services use `watch: false`.
 
 7. Inspect `.pm2/logs/` and `runtime_state/setup_health.json`. After all enabled identities are connected and healthy, save the list in the same PowerShell session:
 
@@ -96,11 +96,11 @@ Run `scripts/start.ps1`. Startup invokes Node directly with the configured local
 & .\scripts\pm2.ps1 save
 ```
 
-Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.0.4 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
+Use `scripts/pm2.ps1` for every PM2 command in this installation. It sets both the checkout's `PM2_HOME` and its scoped Node preloader. PM2 7.1.2 otherwise uses fixed Windows named pipes despite different home folders; bare PM2 commands could reach another daemon. The preloader also preserves installer paths containing spaces and shell metacharacters. It applies to nested PM2 copies used by logrotate. Do not persist its `NODE_OPTIONS` value in the global user environment.
 
 The preloader rejects other PM2 versions and installs logrotate from its committed integrity lock using npm ci with lifecycle scripts disabled. This also pins logrotate's transitive PM2 dependency, which otherwise requests `latest`. Review and retest the namespace adapter before updating PM2. Recheck both dependency trees after installation with `npm audit --prefix tools/pm2` and `npm audit --prefix .pm2/modules/pm2-logrotate`. Audits identify known advisories and do not establish absence of vulnerabilities.
 
-PM2 7.0.4 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
+PM2 7.1.2 can display `waiting restart` for a configured stop exit code when a restart delay is present. Verify PID zero and an unchanged restart count rather than treating that label alone as a restart loop. The real lifecycle test checks exit 103 across the restart delay.
 
 The ecosystem contains all three launchers; a disabled identity exits with code 75 and is excluded from discussions and health checks. To change participation, edit `enabled_bots` to a subset of your configured numeric bot IDs and restart the affected processes. Keep all three identity mappings configured.
 
