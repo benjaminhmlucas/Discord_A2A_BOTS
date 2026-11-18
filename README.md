@@ -175,7 +175,8 @@ checks on an up-to-date branch. Block force pushes and deletion with no bypass
 list. Verify these repository settings; workflow files alone do not enforce them. CI pins action
 commits and runs formatting/lint, strict boundary type checks, Bandit, Python/npm
 audits, CodeQL, both supported OS suites and exact coverage gates. Dependabot proposes
-weekly dependency/action updates. See [the security review policy](docs/security-review.md)
+weekly dependency/action updates as one grouped PR per ecosystem (GitHub Actions, Python
+and npm), with at most one open at a time for each; security updates are not limited. See [the security review policy](docs/security-review.md)
 and [contribution checks](CONTRIBUTING.md). The [prompt-injection policy](docs/prompt-injection.md)
 maps ticket ACs to deterministic authorization and workflow checks, and states their limits.
 
