@@ -18,7 +18,7 @@ Module._load = function (request, parent, isMain) {
     return { ...value, spawn(command, args, options) {
       const windowsHide = process.env.BOTBRIDGE_SHOW_CONSOLE !== '1';
       const npm = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-      if (args.includes('pm2-logrotate@3.0.0')) {
+      if (args.includes('pm2-logrotate@3.0.1')) {
         if (!process.env.PM2_HOME) throw new Error('A scoped PM2_HOME is required');
         let index = args.indexOf('--prefix');
         if (index < 0) index = args.indexOf('--cwd');

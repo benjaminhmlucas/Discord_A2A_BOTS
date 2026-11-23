@@ -453,22 +453,27 @@ def test_release_cli_exit_contract(names, code):
         assert stopped.value.code == code
 
 
-def test_logrotate_unrecognized_parser_existing_backup_and_cli(tmp_path):
-    (tmp_path / "package.json").write_text('{"version":"3.0.0"}')
+def test_logrotate_missing_fix_is_refused_unchanged_and_cli(tmp_path):
+    (tmp_path / "package.json").write_text('{"version":"3.0.1"}')
     path = tmp_path / "app.js"
-    path.write_text("unexpected source")
-    with pytest.raises(RuntimeError, match="Unrecognized"):
-        logrotate.patch(tmp_path)
-    old = "const parseBool = (str, defaultVal = false) => {\n  return str.toLowerCase() === 'true';\n};\n"
-    path.write_text(old)
-    (tmp_path / "app.js.bak").write_text("earlier preserved fixture")
-    logrotate.patch(tmp_path)
-    assert (tmp_path / "app.js.bak").read_text() == "earlier preserved fixture"
+    # The 3.0.0 parser, which ignored real Boolean values.
+    unfixed = (
+        "const parseBool = (str, defaultVal = false) => {\n"
+        "  if (str === 'true') return true;\n"
+        "  if (str === 'false') return false;\n"
+        "  return defaultVal;\n};\n"
+    )
+    for source in ("unexpected source", unfixed):
+        path.write_text(source)
+        with pytest.raises(RuntimeError, match="Boolean parser fix missing"):
+            logrotate.verify(tmp_path)
+        assert path.read_text() == source
+    assert not (tmp_path / "app.js.bak").exists()
     original_read = Path.read_text
 
     def read(path, *args, **kwargs):
         if path.name == "package.json":
-            return '{"version":"3.0.0"}'
+            return '{"version":"3.0.1"}'
         if path.name == "app.js":
             return logrotate.FIX
         return original_read(path, *args, **kwargs)

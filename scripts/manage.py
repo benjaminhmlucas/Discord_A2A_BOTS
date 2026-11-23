@@ -164,7 +164,7 @@ def manage(action, root=ROOT, pm2_args=(), console=None):
     if action == "pm2":
         run([*pm2, *pm2_args], root, env)
         return
-    run([*pm2, "install", "pm2-logrotate@3.0.0"], root, env)
+    run([*pm2, "install", "pm2-logrotate@3.0.1"], root, env)
     run([python, root / "scripts/fix_logrotate.py"], root, env)
     run(
         [

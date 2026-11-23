@@ -117,6 +117,14 @@ three overrides currently match nothing; they stay as a guard if a later version
 the packages back. PM2 7.1.2 instead ships its own patched copy of Chokidar 3.6.0 for
 `pm2 start --watch`, which npm overrides and `npm audit` cannot see. BotBridge services
 run with `watch: false`, so that copy is not used here.
+pm2-logrotate is pinned at 3.0.1, compared with the previously reviewed 3.0.0 package.
+3.0.1 ships the Boolean setting fix that `scripts/fix_logrotate.py` used to apply,
+so the script now only confirms that exact fixed parser is present and changes nothing.
+Its other changes are in rotation itself: one copy per log file at a time, cleanup of a
+failed archive, retention that matches only that file's own archives, and archives that
+keep the original extension. BotBridge's PM2 logs end in `.log`, so archive names
+are unchanged. Its dependency list is unchanged. The package also adds upstream test
+files that BotBridge does not run.
 The unit suite asserts lock equality and the shared override policy. Auditing known advisories and
 exact coverage do not establish absence of unknown vulnerabilities.
 

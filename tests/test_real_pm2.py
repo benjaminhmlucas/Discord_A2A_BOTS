@@ -226,7 +226,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
             assert audit["metadata"]["vulnerabilities"]["total"] == 0
         # Reinstallation deletes the module prefix upstream. The override policy
         # must be applied again before npm resolves the new dependency graph.
-        pm2("install", "pm2-logrotate@3.0.0")
+        pm2("install", "pm2-logrotate@3.0.1")
         command([python, root / "scripts/fix_logrotate.py"])
         pm2("restart", "pm2-logrotate")
         assert json.loads(nested.read_text())["version"] == "7.1.2"
@@ -241,7 +241,7 @@ def test_real_pm2_start_rotation_stop_codes_save_resurrect_and_isolation(tmp_pat
         assert processes(other) == []
         receipt = {
             "real_pm2_version": "7.1.2",
-            "installed_logrotate_version": "3.0.0",
+            "installed_logrotate_version": "3.0.1",
             "isolated_daemons": 2,
             "distinct_rpc_sockets": True,
             "normal_monitoring_preserved": True,
