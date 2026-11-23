@@ -116,15 +116,15 @@ test('only PM2 module npm installation bypasses the shell', () => {
     const destination = path.join(root, 'modules', 'pm2-logrotate');
     fs.mkdirSync(destination, {recursive:true});
     try {
-      for (const args of [ ['install','pm2-logrotate@3.0.0'],
-        ['install','pm2-logrotate@3.0.0','--prefix'],
-        ['install','pm2-logrotate@3.0.0','--prefix',root] ])
+      for (const args of [ ['install','pm2-logrotate@3.0.1'],
+        ['install','pm2-logrotate@3.0.1','--prefix'],
+        ['install','pm2-logrotate@3.0.1','--prefix',root] ])
         assert.throws(()=>scoped.spawn('npm.cmd',args,{}), /unexpected logrotate/);
       for (const flag of ['--prefix','--cwd']) {
         scoped.spawn(flag === '--cwd' ? 'bun' : 'npm.cmd',
-          ['install','pm2-logrotate@3.0.0',flag,destination],{shell:true});
+          ['install','pm2-logrotate@3.0.1',flag,destination],{shell:true});
         const policy=JSON.parse(fs.readFileSync(path.join(destination,'package.json')));
-        assert.equal(policy.dependencies['pm2-logrotate'],'3.0.0');
+        assert.equal(policy.dependencies['pm2-logrotate'],'3.0.1');
         assert.equal(policy.overrides.pm2,'7.1.2');
         assert.deepEqual(JSON.parse(fs.readFileSync(path.join(destination,'package-lock.json'))), require('../dependencies/logrotate/package-lock.json'));
         assert.equal(calls.at(-1)[1][1],'ci');
@@ -138,7 +138,7 @@ test('only PM2 module npm installation bypasses the shell', () => {
         for (const show of ['0','1']) {
           process.env.BOTBRIDGE_SHOW_CONSOLE = show;
           for (const [command,args] of [ ['npm.cmd',['version']], ['bun',['version']],
-            ['npm.cmd',['install','pm2-logrotate@3.0.0','--prefix',destination]] ]) {
+            ['npm.cmd',['install','pm2-logrotate@3.0.1','--prefix',destination]] ]) {
             scoped.spawn(command,args,{stdio:'inherit'});
             assert.equal(calls.at(-1)[2].windowsHide,show !== '1');
             assert.equal(calls.at(-1)[2].stdio,'inherit');
@@ -149,7 +149,7 @@ test('only PM2 module npm installation bypasses the shell', () => {
         else process.env.BOTBRIDGE_SHOW_CONSOLE = priorConsole;
       }
       delete process.env.PM2_HOME;
-      assert.throws(()=>scoped.spawn('npm.cmd',['install','pm2-logrotate@3.0.0'],{}),/scoped PM2_HOME/);
+      assert.throws(()=>scoped.spawn('npm.cmd',['install','pm2-logrotate@3.0.1'],{}),/scoped PM2_HOME/);
     } finally {
       if (savedHome === undefined) delete process.env.PM2_HOME;
       else process.env.PM2_HOME=savedHome;

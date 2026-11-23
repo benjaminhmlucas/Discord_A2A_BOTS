@@ -59,8 +59,8 @@ def inspect(root=ROOT):
         )
         source = module.read_text(encoding="utf-8")
         if (
-            "str === true || str === 'true'" not in source
-            or "str === false || str === 'false'" not in source
+            "val === true || val === 'true'" not in source
+            or "val === false || val === 'false'" not in source
         ):
             failures.append("logrotate Boolean fix missing; verify module after reinstall")
     except OSError:

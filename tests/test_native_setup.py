@@ -165,7 +165,7 @@ def test_fresh_install_and_start_success_and_failure_propagation(tmp_path):
     failing["BOTBRIDGE_FAKE_PM2_FAIL"] = "install"
     wrapper("start.ps1", "start-failure", 1, failing)
     after = json.loads((root / ".pm2/fixture_commands.json").read_text())
-    assert after[len(records) :] == [["install", "pm2-logrotate@3.0.0"]]
+    assert after[len(records) :] == [["install", "pm2-logrotate@3.0.1"]]
     wrapper("setup.ps1", "setup-failure", 7, extra=("-StubPythonLauncher", "-StubExitCode", "7"))
     assert len(receipts) == 5
 
