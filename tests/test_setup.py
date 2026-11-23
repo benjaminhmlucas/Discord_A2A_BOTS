@@ -70,25 +70,6 @@ class SetupTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "verification"):
                     initialize(201, 301, 101, 102, 103, root)
 
-    def test_logrotate_detects_write_not_persisted(self):
-        from unittest.mock import patch
-
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "package.json").write_text('{"version":"3.0.0"}')
-            app = root / "app.js"
-            app.write_text(
-                "const parseBool = (str, defaultVal = false) => {\n  return str.toLowerCase() === 'true';\n};\n"
-            )
-            original = Path.write_text
-
-            def write(path, *args, **kwargs):
-                return 0 if path == app else original(path, *args, **kwargs)
-
-            with patch.object(Path, "write_text", write):
-                with self.assertRaisesRegex(RuntimeError, "verification"):
-                    logrotate.patch(root)
-
     def test_release_gate_finds_private_paths_and_synthetic_secrets(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -103,18 +84,16 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(len(failures), 3)
             self.assertTrue(any(reason == "credential-like content" for _, reason in failures))
 
-    def test_logrotate_patch_idempotent_and_version_checked(self):
+    def test_logrotate_fix_verified_unchanged_and_version_checked(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "package.json").write_text('{"version":"3.0.0"}')
-            (root / "app.js").write_text(
-                "const parseBool = (str, defaultVal = false) => {\n  return str.toLowerCase() === 'true';\n};\n"
-            )
-            logrotate.patch(root)
-            first = (root / "app.js").read_text()
-            logrotate.patch(root)
-            self.assertEqual(first, (root / "app.js").read_text())
-            self.assertIn(logrotate.FIX, first)
-            (root / "package.json").write_text('{"version":"99.0.0"}')
-            with self.assertRaises(RuntimeError):
-                logrotate.patch(root)
+            (root / "package.json").write_text('{"version":"3.0.1"}')
+            source = "// upstream module\n" + logrotate.FIX + "\nvar TZ = conf.TZ;\n"
+            (root / "app.js").write_text(source)
+            logrotate.verify(root)
+            self.assertEqual(source, (root / "app.js").read_text())
+            self.assertEqual(["app.js", "package.json"], sorted(p.name for p in root.iterdir()))
+            for version in ("3.0.0", "99.0.0"):
+                (root / "package.json").write_text(f'{{"version":"{version}"}}')
+                with self.assertRaisesRegex(RuntimeError, "Unexpected logrotate version"):
+                    logrotate.verify(root)

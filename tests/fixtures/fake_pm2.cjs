@@ -18,7 +18,7 @@ try {
 if (args[0] === 'install') {
   const directory = path.join(home, 'modules', 'pm2-logrotate', 'node_modules', 'pm2-logrotate');
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ version: '3.0.0' }));
-  fs.writeFileSync(path.join(directory, 'app.js'), "const parseBool = (str, defaultVal = false) => {\n  return str.toLowerCase() === 'true';\n};\n");
+  fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ version: '3.0.1' }));
+  fs.writeFileSync(path.join(directory, 'app.js'), "const parseBool = (val, defaultVal = false) => {\n  if (val === true || val === 'true') return true;\n  if (val === false || val === 'false') return false;\n  return defaultVal;\n};\n");
 }
 if (process.env.BOTBRIDGE_FAKE_PM2_FAIL === args[0]) process.exit(7);

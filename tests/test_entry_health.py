@@ -162,7 +162,7 @@ def health_fixture(root):
     )
     module = root / ".pm2/modules/pm2-logrotate/node_modules/pm2-logrotate/app.js"
     module.parent.mkdir(parents=True)
-    module.write_text("str === true || str === 'true'; str === false || str === 'false'")
+    module.write_text("val === true || val === 'true'; val === false || val === 'false'")
     return module
 
 
