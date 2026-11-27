@@ -1,8 +1,8 @@
 -r requirements.txt
-coverage==7.17.3
+coverage==7.17.5
 pytest==9.2.0
-ruff==0.17.5
+ruff==0.17.6
 mypy==2.4.1
 bandit==1.9.4
 pip-audit==2.10.1
-PyYAML==6.0.3
+PyYAML==6.0.4
